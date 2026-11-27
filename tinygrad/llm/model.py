@@ -51,8 +51,8 @@ def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|
   if kern.op is Ops.SINK and kern.arg is None:
     kern = kern.substitute({b: b.replace(src=b.src[:1] + UOp.device_range_src(device), arg=replace(b.arg, device=device))
                             for b in kern.toposort() if b.op is Ops.ALLOC and b.arg.device is None})
-  out = UOp.alloc(out_shape, dtypes.float32, device=device, axis=axis)
-  return Tensor(out.after(kern.call(out, *(a.uop if isinstance(a, Tensor) else a for a in args))))
+  out, used = UOp.alloc(out_shape, dtypes.float32, device=device, axis=axis), {p.arg.slot for p in kern.toposort() if p.op is Ops.PARAM}
+  return Tensor(out.after(kern.call(out, *((a.uop if isinstance(a, Tensor) else a) if i in used else out for i, a in enumerate(args, 1)))))
 
 @functools.cache
 def _iq_lut(t:int, dev:str|tuple[str, ...]) -> UOp:
@@ -132,10 +132,10 @@ class Linear(nn.Linear):
 
   def _custom_dense(self, x:Tensor) -> Tensor|None:
     if self.groups != 1 or not isinstance(x.numel(), int) or self.in_features % 32 != 0: return None
-    w, xi = _unview_float(self.weight).contiguous(), _unview_float(x).contiguous()
+    w, xi = _unview_float(self.weight), _unview_float(x).contiguous()
     ok, tokens = (dtypes.float16, dtypes.bfloat16, dtypes.float32), int(prod(x.shape[:-1]))
-    if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16: return None
-    if self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok): return None
+    if not w.uop.has_buffer_identity(after_ok=True) or w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok: return None
+    if xi.dtype not in ok or tokens >= 16 or (self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok)): return None
     out_dt = least_upper_dtype(w.dtype, x.dtype)
     vc = 4 if self.in_features % 128 == 0 else 1
     out = _run_kernel(f"amd_gemv_{w.dtype.name}_f32", (tokens, self.out_features),
@@ -656,7 +656,7 @@ class TransformerBlock(FFNBlock):
       q_axis, valid_kv = q_in.uop.axis, sp if isinstance(sp, UOp) else UOp.const(int(sp))
       valid_kv_offset, attn = T_real if isinstance(T_real, int) else 0, None
       if resolve(T_real == 1, False) and sh_m == 1 and D % 64 == 0 and 1 <= D <= 512 \
-          and (group := sh_h // sh_hkv) in (1, 2, 4, 8) and N_phys % 64 == 0:
+          and 1 <= (group := sh_h // sh_hkv) <= 8 and N_phys % 64 == 0:
         attn = _run_kernel("amd_flash_decode", q_shard, q_in.device, q_in, kv, valid_kv, axis=q_axis, B=sh_b, H_KV=sh_hkv, G=group,
                            d_blks=D // 64, n_blks=N_phys // 64, C=min(max(8, 64 // (sh_b * sh_hkv)), 64, ceildiv(N_phys, 64)),
                            valid_kv_offset=valid_kv_offset)
@@ -992,7 +992,6 @@ class GatedDeltaNetBlock(FFNBlock):
     T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
 
     # input processing
-    x = x.half()
     out_gate = (self.ssm_g(x) if hasattr(self, "ssm_g") else self.ssm_g_b(self.ssm_g_a(x))) if is_kda else self.attn_gate(x)
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)

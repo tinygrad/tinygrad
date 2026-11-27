@@ -1329,7 +1329,9 @@ def _fp8_dequant_b128(q:int, get_u:Callable[[int|UOp], UOp], grid:UOp, bg:UOp, g
   if q == IQ3_S:
     q0, q1, s0, d_f = get_u(0), get_u(1), get_u(2), _half(get_u(5))
     qh_s, sc_n = (get_u(3) >> _sh((sub & 1) * 8)) & 255, (get_u(4) >> _sh((sub & 3) * 4)) & 15
-    inv_r, meta = scale_fn(d_f.abs() * UOp.const(2.0, dtypes.float32))
+    sc_m = sc_n.maximum(_lane_xor(sc_n, 1, dpp=True))
+    sc_m = sc_m.maximum(_lane_xor(sc_m, 2, dpp=True))
+    inv_r, meta = scale_fn(d_f.abs() * (1.0 + 2.0 * sc_m.float()) * UOp.const(15.0 / 448.0, dtypes.float32))
     sn = (1.0 + 2.0 * sc_n.float()) * (d_f * inv_r)
     l0, l1 = _pack4_fp8(*(float(v) * sn for v in (1, 3, 5, 7))), _pack4_fp8(*(float(v) * sn for v in (9, 11, 13, 15)))
     return put_r(lambda i: _amd_byte_perm(l1, l0, (grid[(((i < 4).where(q0, q1) >> _sh((i & 3) * 8)) & 255) |
@@ -1783,7 +1785,8 @@ def _rdna4_gemm_fp8_dense_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, *,
         if q == IQ3_S:
           q_h, s_h, d_f = get_u(0), get_u(1), _half(get_u(4))
           qh_4, sc_n = (get_u(2) >> _sh((sub & 1) * 8 + hg * 4)) & 15, (get_u(3) >> _sh((sub & 3) * 4)) & 15
-          new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(2.0, dtypes.float32))
+          sc_m = sc_n.maximum(_lane_xor(sc_n, 2, dpp=True))
+          new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * (1.0 + 2.0 * sc_m.float()) * UOp.const(15.0 / 448.0, dtypes.float32))
           sn = (1.0 + 2.0 * sc_n.float()) * (d_f * inv_r)
           l0, l1 = _pack4_fp8(*(float(v) * sn for v in (1, 3, 5, 7))), _pack4_fp8(*(float(v) * sn for v in (9, 11, 13, 15)))
           return put4_r(lambda i: _amd_byte_perm(

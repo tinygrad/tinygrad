@@ -2,7 +2,7 @@ import ast, pathlib, subprocess, sys, unittest
 from unittest.mock import patch
 
 import numpy as np
-from tinygrad import Device, Tensor, UOp, dtypes
+from tinygrad import Context, Device, Tensor, UOp, dtypes
 from tinygrad.helpers import DEV
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -236,6 +236,51 @@ class TestSlopKernelsUIR(unittest.TestCase):
                    B=1, H_KV=1, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0).numpy()
     ref_fs = q_fa.float().scaled_dot_product_attention(kv_fa[0, :, :, :41].float(), kv_fa[1, :, :, :41].float(), enable_gqa=True).numpy()
     np.testing.assert_allclose(got_fs, ref_fs, rtol=5e-3, atol=5e-3)
+
+  def test_regression_guards(self):
+    if (tgt := _amd_target()) is None: self.skipTest("AMD HIP renderer required")
+    from tinygrad.llm.model import Linear, TransformerBlock, TransformerConfig
+    from slopkernels.bench import _iq_lut, _make_packed, _packed_words
+    dev, rng = Tensor.empty(1).device, np.random.default_rng(19)
+    def _knames(t:Tensor) -> list[str]:
+      with Context(ALLOW_DEVICE_USAGE=0): linear, _ = t.linear_with_externs()
+      return [c.src[0].arg.name if c.src[0].arg else "" for c in linear.src if c.src[0].op is Ops.SINK]
+    # 1. RDNA4 OTF FP8 IQ3_S GEMM accuracy across a 7.5x superblock scale jump (would clip >448 without sc_m scale)
+    if tgt[0] == 12:
+      m, n, k = 128, 2048, 512
+      qtype, w_len, w_dt, _ = _packed_words(n, k, "IQ3_S")
+      _, tile_u8 = _make_packed(n, k, "IQ3_S", dev)
+      raw_tile = tile_u8.numpy().reshape(tile_u8.shape[0], k // 256, 110).copy()
+      raw_tile[:, 0, :2], raw_tile[:, 0, 106:110] = np.frombuffer(np.float16(0.01).tobytes(), dtype=np.uint8), 0x00
+      raw_tile[:, 1, :2], raw_tile[:, 1, 106:110] = np.frombuffer(np.float16(0.075).tobytes(), dtype=np.uint8), 0xff
+      w_np = np.broadcast_to(raw_tile.reshape(tile_u8.shape)[None], (n // tile_u8.shape[0], *tile_u8.shape)).reshape(-1).copy()
+      w_u8, x, (lut, _) = Tensor(w_np, device=dev).realize(), Tensor(np.eye(m, k, k=256, dtype=np.float16), device=dev).realize(), _iq_lut(qtype, dev)
+      out = _krun("rdna4_gemm_f16", (m, n), dev, w_u8, x, lut,
+                  qtype=qtype, m_blks=m // 64, m_tiles=4, out_features=n, in_features=k, raw_bytes=w_len * w_dt.itemsize)[:, :4].numpy()
+      w4 = ggml_data_to_tensor(Tensor(raw_tile[:4].reshape(-1), device=dev), 4 * k, qtype).reshape(4, k).numpy()
+      np.testing.assert_allclose(out, w4[:, 256:384].T, rtol=8e-2, atol=1e-2)
+    # 2. Unused PARAM slots (sel/grid) must not emit extra E/copy kernels or require ALLOW_DEVICE_USAGE
+    w_u8, _, w_ref = _make_q8_0(rng, 64, 256)
+    qlin = Linear(256, 64, bias=False)
+    qlin.weight = ggml_data_to_tensor(w_u8, 64 * 256, 8).reshape(64, 256)
+    qx = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).realize()
+    self.assertEqual(_knames(qlin(qx)), ["linear_quant"])
+    # 3. Unrealized f32->f16 dense weight must fuse in pure tinygrad (no cast kernel), while realized f16 uses linear_f16_gemv
+    w_f32 = Tensor(rng.standard_normal((48, 256)).astype(np.float32)).realize()
+    dlin_lazy, dlin_f16 = Linear(256, 48, bias=False), Linear(256, 48, bias=False)
+    dlin_lazy.weight, dlin_f16.weight = w_f32.cast(dtypes.half), w_f32.cast(dtypes.half).contiguous().realize()
+    self.assertEqual(len(_knames(dlin_lazy(qx).sigmoid())), 1)
+    self.assertEqual(_knames(dlin_f16(qx)), ["linear_f16_gemv"])
+    # 4. GQA group=6 (e.g. qwen3.8:27b H=24, H_KV=4) must dispatch amd_flash_decode
+    cfg = TransformerConfig(num_blocks=1, dim=256, hidden_dim=256, n_heads=24, n_kv_heads=4, norm_eps=1e-6, vocab_size=64,
+                            head_dim=64, rope_theta=10000.0, rope_dim=64, v_head_dim=64, max_context=128)
+    blk = TransformerBlock(cfg)
+    for p in (blk.attn_q.weight, blk.attn_k.weight, blk.attn_v.weight, blk.attn_output.weight): p.realize()
+    bx = Tensor(rng.standard_normal((1, 1, 256)).astype(np.float32)).realize()
+    blk._init_state(bx)
+    attn_names = _knames(blk._attention(bx, (UOp.variable("start_pos", 0, 127).bind(5),)))
+    self.assertIn("flash_decode_partial", attn_names)
+    self.assertIn("flash_decode_combine", attn_names)
 
 
 if __name__ == "__main__":
