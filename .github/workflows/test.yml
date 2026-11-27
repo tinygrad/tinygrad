@@ -530,8 +530,6 @@ jobs:
           echo "LLVM_PATH=$llvm_path" >> "$GITHUB_ENV"
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
-      - name: Check ROCprof callback warnings
-        run: python -m pytest test/amd/test_sqtt_examples.py -vv -rs
       - name: Run AMD renderer tests
         run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)
