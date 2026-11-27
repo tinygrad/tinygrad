@@ -288,7 +288,7 @@ def _causal_mask(x:Tensor, start_pos:StartPos, window:int=0) -> Tensor|None:
   if window: valid = valid & (k_pos > q_pos-window)
   return valid.where(0.0, -math.inf).cast(x.dtype)
 
-def clip_norm(x:Tensor, limit:float) -> Tensor: return x * (limit / (x.square().sum(-1, keepdim=True).sqrt() + 1e-6)).clamp(max_=1.0)
+def clip_norm(x:Tensor, limit:float) -> Tensor: return x * (limit / x.square().sum(-1, keepdim=True).sqrt().maximum(limit))
 
 def permute_rope(w:Tensor, n_heads:int, rope_dim:int) -> Tensor:
   x = w.reshape(n_heads, w.shape[0]//n_heads, -1)
@@ -377,7 +377,7 @@ class IndexerConfig:  # select top_k tokens by scoring individual keys or pools 
   candidates: IndexerCandsConfig|None = None
 
 @dataclass(frozen=True)
-class RelAttnConfig:  # attention with a learned relative position bias over length buckets, plus short convs on k, v and the outputs
+class RelAttnConfig:  # relative position attention
   length: int
   extent: int
   qk_clip: float
@@ -387,7 +387,7 @@ class RelAttnConfig:  # attention with a learned relative position bias over len
   conv_kernel: int
 
 @dataclass(frozen=True)
-class LoopConfig:  # blocks [start, end) run count times with shared weights, passes talk through rank gate_rank gates
+class LoopConfig:  # run blocks [start, end) count times
   start: int
   end: int
   count: int
@@ -545,7 +545,6 @@ class LoopCtrl:
   def __init__(self, config:TransformerConfig):
     D, R, self.msg_query = config.dim, unwrap(config.loop).gate_rank, AttentionResidual(config, queries=4)
     self.down, self.gain, self.forget = ({n: Linear(i, o, bias=False) for n in ("q", "k", "v", "ffn")} for i, o in ((2*D, R), (R, D), (R, D)))
-  # gate the message from prev_pass into input n (q, k, v or ffn)
   def __call__(self, prev_pass:Tensor, h:Tensor, n:str) -> Tensor:
     i = ("q", "k", "v", "ffn").index(n)
     m, h = self.msg_query.mix(prev_pass)[:, :, i], h if h.ndim == 3 else h[:, :, i]  # h: (B, T, D), or (B, T, 3, D) for q, k and v
@@ -752,14 +751,12 @@ class RelAttentionBlock(TransformerBlock):
     self.attn_k_conv, self.attn_v_conv = ({"weight": Tensor.zeros(Hkv*hd, ra.conv_kernel)} for _ in range(2))
     self.attn_post_conv, self.ffn_post_conv = ({"weight": Tensor.zeros(D, ra.conv_kernel)} for _ in range(2))
     if not config.sliding_window:
-      # q, k and v each get their own input norm in _attention
-      self.attn_norm, self.attn_q_inp_norm, self.attn_k_inp_norm, self.attn_v_inp_norm = lambda x: x, *(nn.RMSNorm(D, config.norm_eps) for _ in "qkv")
+      self.attn_q_inp_norm, self.attn_k_inp_norm, self.attn_v_inp_norm, self.attn_norm = *(nn.RMSNorm(D, config.norm_eps) for _ in "qkv"), lambda x: x
       self.attn_k_conv_proj, self.attn_v_conv_proj = (Linear(D, Hkv*ra.conv_kernel, bias=False) for _ in range(2))
       if config.attn_res_block_size: self.attn_res_score = AttentionResidual(config, config.attn_res_new_block, 3)
 
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len if prefix_len == cached_len else 0
 
-  # causal conv over time with a residual, on full attention layers k and v also get per token taps from the input
   def _conv(self, conv:dict[str, Tensor], x:Tensor, taps:Tensor|None=None) -> Tensor:
     (B, T, C), T_pad, H, w = x.shape, x.max_shape[1], self.config.n_kv_heads, conv["weight"]
     if taps is not None: w = w + taps.pad_to((B, T_pad, taps.shape[-1])).reshape(B, T_pad, H, -1).flip(-1).repeat_interleave(int(C)//H, dim=2)
@@ -768,23 +765,22 @@ class RelAttentionBlock(TransformerBlock):
 
   def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor:
     assert len(start_pos) == 1, "independent positions are not supported for relative attention"
-    (B, T), cfg, ra = x.shape[:2], self.config, unwrap(self.config.rel_attn)
-    H, Hkv, window = cfg.n_heads, cfg.n_kv_heads, cfg.sliding_window
+    (B, T), cfg, ra, H, window = x.shape[:2], self.config, unwrap(self.config.rel_attn), self.config.n_heads, self.config.sliding_window
+    self.initial, pos = Tensor(start_pos[0]).eq(0), Tensor(start_pos[0]) + Tensor.arange(T)
+    log_scale = 1 if window else (1 + ra.log_scale_alpha * ((pos + 1).float() / ra.log_scale_floor).maximum(1).log()).reshape(1, T, 1, 1)
     xq, xk, xv = (x, x, x) if x.ndim == 3 else (x[:, :, 0], x[:, :, 1], x[:, :, 2])
     if not window: xq, xk, xv = self.attn_q_inp_norm(xq), self.attn_k_inp_norm(xk), self.attn_v_inp_norm(xv)
-    self.initial, pos = Tensor(start_pos[0]).eq(0), Tensor(start_pos[0]) + Tensor.arange(T)  # the conv states reset at position 0
-    log_scale = 1 if window else (1 + ra.log_scale_alpha * ((pos + 1).float() / ra.log_scale_floor).clamp(min_=1).log()).reshape(1, T, 1, 1)
     q = self.attn_q(xq).reshape(B, T, H, -1).float() * self.attn_q_clip["weight"]
-    rel_q = clip_norm(self.attn_rel(xq).reshape(B, T, H, -1).float() * self.attn_rel_clip["weight"], ra.rel_clip) * log_scale
-    k = self._conv(self.attn_k_conv, self.attn_k(xk), None if window else self.attn_k_conv_proj(xk)).reshape(B, T, Hkv, -1)
-    v = self._conv(self.attn_v_conv, self.attn_v(xv), None if window else self.attn_v_conv_proj(xv)).reshape(B, T, Hkv, -1)
+    k = self._conv(self.attn_k_conv, self.attn_k(xk), None if window else self.attn_k_conv_proj(xk)).reshape(B, T, cfg.n_kv_heads, -1)
+    v = self._conv(self.attn_v_conv, self.attn_v(xv), None if window else self.attn_v_conv_proj(xv)).reshape(B, T, cfg.n_kv_heads, -1)
     q, k, v = clip_norm(q, ra.qk_clip) * log_scale, clip_norm(k, ra.qk_clip), v.rmsnorm(eps=cfg.norm_eps)
     kv = _cache_prefix(_update_cache(self.cache_kv.transpose(0, 1), Tensor.stack(k, v, dim=1).transpose(2, 3), start_pos, 3), start_pos, T, 3)
-    rel = (rel_q @ self.attn_rel_bias["weight"].T).transpose(1, 2).pad((0, 1))  # (B, H, T, E+1)
-    dist = (pos.reshape(T, 1) - Tensor.arange(kv.shape[3])).clamp(0, rel.shape[-1] - 1)
-    bias = rel.gather(-1, dist.expand(B, H, T, -1).cast(dtypes.int32))
+    rel_q = clip_norm(self.attn_rel(xq).reshape(B, T, H, -1).float() * self.attn_rel_clip["weight"], ra.rel_clip) * log_scale
+    rel = (rel_q @ self.attn_rel_bias["weight"].T).transpose(1, 2)  # (B, H, T, E)
+    dist = (pos.reshape(T, 1) - Tensor.arange(kv.shape[3])).clamp(0, rel.shape[-1])
+    bias = rel.pad((0, 1)).contiguous().gather(-1, dist.expand(B, H, T, -1).cast(dtypes.int32))
     if (mask:=_causal_mask(x, start_pos, window)) is not None: bias = bias + mask
-    sink = self.attn_sink_proj(xq).transpose(1, 2).unsqueeze(-1).float()
+    sink = self.attn_sink_proj(xq).transpose(1, 2).unsqueeze(-1).float().contiguous()
     attn = sink_attention(q.transpose(1, 2), kv[:, 0], kv[:, 1], bias, sink).transpose(1, 2).reshape(B, T, -1)
     return self._conv(self.attn_post_conv, self.attn_output(attn * self.attn_gate(xq).sigmoid()))
 
@@ -1209,28 +1205,30 @@ class Transformer:
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     elif self.config.attn_res_block_size: x = x.unsqueeze(2)
     idx_mask, pre = None, None
-    for block in (self.layers if self.config.loop else self.blk): x, idx_mask, pre = block(x, start_pos, idx_mask, t, pre)
+    for block in (self.looped_blk if self.config.loop else self.blk): x, idx_mask, pre = block(x, start_pos, idx_mask, t, pre)
     if pre is not None: x = weighted_sum(x, pre)
     elif hc is not None: x = self.output_hc.mix(x)[0] if hasattr(self, 'output_hc') else x.mean(2)
     elif self.config.attn_res_block_size: x = self.output_res_score.mix(x)
     # only run the output projection on the last token
-    logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :self.config.vocab_size].to(tokens.device)
+    logits = self.output(self.output_norm(x[:, -1:]))[:, -1].to(tokens.device)
     if (cap:=self.config.logit_softcap): logits = (logits / cap).tanh() * cap
+    # mask instead of slicing so argmax keeps a splittable width
+    if (pad:=logits.shape[-1] - self.config.vocab_size): logits = logits[:, :self.config.vocab_size].pad((None, (0, pad)), value=float("-inf"))
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
-  # built once on first use: each loop copy keeps its caches across calls, and at load time its blocks would be extra state_dict keys
+  # built on first use: the copies keep their caches and stay out of the state_dict at load
   @functools.cached_property
-  def layers(self) -> list[Callable]:
+  def looped_blk(self) -> list[Callable]:
     loop = unwrap(self.config.loop)
     passes = [[copy.copy(b) for b in self.blk[loop.start:loop.end]] for _ in range(loop.count)]
-    def looped_blks(prelude:Tensor, start_pos:StartPos, idx_mask:Tensor|None, tokens:Tensor|None, pre:Tensor|None):
+    def run_loop(prelude:Tensor, start_pos:StartPos, idx_mask:Tensor|None, tokens:Tensor|None, pre:Tensor|None):
       h, prev_pass = prelude, None
       for i, blocks in enumerate(passes):
         if i > 0: prev_pass, h = h[:, :, prelude.shape[2]:], prelude
         for block in blocks: h, idx_mask, pre = block(h, start_pos, idx_mask, tokens, pre, prev_pass)
       return h, idx_mask, pre
-    return [*self.blk[:loop.start], looped_blks, *self.blk[loop.end:]]
+    return [*self.blk[:loop.start], run_loop, *self.blk[loop.end:]]
 
   def __call__(self, tokens:Tensor, start_pos:StartPos, temperature:Tensor) -> Tensor:
     assert len(start_pos) in (1, tokens.shape[0]), "expected one shared position or one position per batch row"

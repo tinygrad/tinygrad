@@ -520,19 +520,13 @@ class TestTransformerGenerate(unittest.TestCase):
                      [("reasoning_content", "reasoning"), ("content", "answer")])
 
   def test_inkling_output(self):
-    # every message is <|message_model|>...<|end_message|>: thinking, then text or a tool call
-    think, text = '<|message_model|><|content_thinking|>a b<|end_message|>', '<|message_model|><|content_text|>c d<|end_message|>'
-    call = '{"name":"read","args":{"path":"x","n":3}}'
-    tool = f'<|message_model|>read<|content_invoke_tool_json|>{call}<|end_message|>'
-    read = [('read', {'path':'x', 'n':3})]
-    for output, reasoning, content, calls in ((think + tool, 'a b', '', read), (think + text, 'a b', 'c d', []), (text + tool, '', 'c d', read)):
-      with self.subTest(output=output):
-        router = StreamRouter({"<|content_invoke_tool_json|>": 0})
-        # one character at a time, so every tag arrives split
-        deltas = [d for ch in output for d in router.route(ch)] + list(router.route("", final=True))
-        self.assertEqual(''.join(t for f, t in deltas if f == 'reasoning_content'), reasoning)
-        self.assertEqual(''.join(t for f, t in deltas if f == 'content'), content)
-        self.assertEqual([parse_tool_call(m.group(1)) for m in re.finditer(router.call, router.buf, re.DOTALL)], calls)
+    def msg(kind, body, name=''): return f'<|message_model|>{name}<|content_{kind}|>{body}<|end_message|>'
+    output = msg('thinking', 'a', 'read') + msg('text', 'b') + msg('invoke_tool_json', '{"name":"read","args":{"n":3}}', 'read') + msg('text', 'c')
+    router = StreamRouter({"<|content_invoke_tool_json|>": 0})
+    deltas = [d for ch in output for d in router.route(ch)] + list(router.route("", final=True))
+    self.assertEqual(''.join(t for f, t in deltas if f == 'reasoning_content'), 'a')
+    self.assertEqual(''.join(t for f, t in deltas if f == 'content'), 'bc')
+    self.assertEqual([parse_tool_call(m.group(1)) for m in re.finditer(router.call, router.calls, re.DOTALL)], [('read', {'n':3})])
 
 if __name__ == '__main__':
   unittest.main()
