@@ -696,6 +696,16 @@ class TestFunctionTuple(unittest.TestCase):
     out = f(Tensor([1., 1., 1., 1.]).contiguous().realize())
     np.testing.assert_allclose(out.numpy(), [11., 21., 31., 41.])
 
+  def test_invalid_store_into_explicit_arg_keeps_writes(self):
+    # the caller sees the write to a[1] even with an Invalid store to a[:1]
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        @function(precompile=precompile)
+        def f(a:Tensor): return Tensor(a.uop.after(a.uop[:1].store(Invalid), a.uop[1:2].store(40.)))[1:2] + 1
+        a = Tensor([10., 20., 30.]).contiguous().realize()
+        np.testing.assert_allclose(f(a).numpy(), [41.])
+        np.testing.assert_allclose(a.numpy()[1:], [40., 30.])
+
   def test_custom_kernel_precompile_further_compute(self, multi=False, kernel_count:int=2):
     devs = ("CPU:0", "CPU:1")
     def my_kernel(C:UOp, A:UOp) -> UOp:
