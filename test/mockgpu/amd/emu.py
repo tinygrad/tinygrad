@@ -1938,8 +1938,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     params.append(UOp.param(len(bufs), dtypes.int, addrspace=AddrSpace.ALU))
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, dtype=dtypes.int)
-    gates = (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
-                       1, dtype=dtypes.int),) if routed else ()
+    gates = (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int), 1, dtype=dtypes.int),) if routed else ()
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("emu_waves"))
