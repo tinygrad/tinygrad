@@ -86,6 +86,14 @@ class TestSymbolicReshape(unittest.TestCase):
         ret = ret.reshape(1, vi*vj)
         assert ret.shape == (1, vi*vj)
 
+class TestSymbolicOps(unittest.TestCase):
+  def test_invalid_symbolic_reshape(self):
+    a = Tensor.rand(30)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      # Cannot reshape into symbolic from non-symbolic
+      with self.assertRaises(ValueError): a.reshape((3, vi))
+
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
     vi = Variable("i", 1, 5).bind(3)
@@ -131,6 +139,14 @@ class TestSymbolicContiguousViewOffset(unittest.TestCase):
     v = Variable("v", 1, 7).bind(4)
     t = Tensor.rand(10).realize().shrink(((3, 3+v),))
     self.assertEqual(t.uop.contiguous_view_offset(), 3)
+
+class TestTensorVariable(unittest.TestCase):
+  def test_symbolic_chunk_error_on_symbolic_dim(self):
+    # chunk should fail when trying to split along a symbolic dimension
+    vv = Variable("a", 1, 10).bind(4)
+    t = Tensor.ones(10, 8).contiguous()[:vv, :]  # shape (vv, 8)
+    with self.assertRaises(AssertionError):
+      t.chunk(2, dim=0)  # can't split along symbolic dim
 
 if __name__ == '__main__':
   unittest.main()

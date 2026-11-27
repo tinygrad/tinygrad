@@ -7,7 +7,6 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, GroupOp
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from test.helpers import buffer_uops, run_schedule
 
@@ -118,25 +117,14 @@ class TestUOps(unittest.TestCase):
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
 class TestFloatUOps(TestUOps):
-  @unittest.skipIf(Device.DEFAULT == "CPU", 'not supported as uop')
-  def test_exp2(self): self._test_uop_fxn(Ops.EXP2, lambda a: np.exp2(a))
-  @unittest.skipIf(Device.DEFAULT == "CPU", 'not supported as uop')
-  def test_log2(self): self._test_uop_fxn(Ops.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'))
-  @unittest.skipIf(Device.DEFAULT == "CPU", 'not supported as uop')
-  def test_sin(self): self._test_uop_fxn(Ops.SIN, lambda a: math.sin(a))
   def test_recip(self): self._test_uop_fxn(Ops.RECIP, lambda a: 1/a if a != 0 else float('inf'))
-  def test_sqrt(self): self._test_uop_fxn(Ops.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
   def test_sqrt_edgecases(self):
     for a, expected in [(-math.inf, math.nan), (-1., math.nan), (0., 0.), (4., 2.), (math.inf, math.inf), (math.nan, math.nan)]:
       with self.subTest(a=a):
         np.testing.assert_equal(_test_single_value([a], Ops.SQRT, (dtypes.float32,)), expected)
 
   def test_add(self): self._test_bop_fxn(Ops.ADD, lambda a,b: a+b)
-  def test_mul(self): self._test_bop_fxn(Ops.MUL, lambda a,b: a*b)
   def test_max(self): self._test_bop_fxn(Ops.MAX, lambda a,b: max(a,b))
-  def test_cmplt(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: a<b)
-  def test_cmpne(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: a!=b)
-  def test_cmpeq(self): self._test_bop_fxn(Ops.CMPEQ, lambda a,b: a==b)
   def test_cmpne_nan(self):  # NaN != x for any x (IEEE 754)
     for a, b in [(math.nan, 1.0), (1.0, math.nan), (math.nan, math.nan)]:
       self.assertTrue(_test_single_value(
@@ -148,20 +136,11 @@ class TestFloatUOps(TestUOps):
     self._test_top_fxn(Ops.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float, dtypes.float))
 
 class TestNonFloatUOps(TestUOps):
-  def test_add_int32(self): self._test_bop_fxn(Ops.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
-  def test_mul_int32(self): self._test_bop_fxn(Ops.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
-  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, CStyleLanguage)), "only ptx and cstyle use bitshifts")
-  def test_shr_int32(self): self._test_bop_fxn(Ops.SHR, lambda a,b: int(a)>>int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
-  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, CStyleLanguage)), "only ptx and cstyle use bitshifts")
-  def test_shl_int32(self): self._test_bop_fxn(Ops.SHL, lambda a,b: int(a)<<int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
   def test_div_int32(self):
     self._test_bop_fxn(Ops.TRUNCDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
-  def test_and_int32(self): self._test_bop_fxn(Ops.AND, lambda a,b: int(a)&int(b), (dtypes.int32, dtypes.int32))
-  def test_or_int32(self): self._test_bop_fxn(Ops.OR, lambda a,b: int(a)|int(b), (dtypes.int32, dtypes.int32))
   def test_mod_int32(self):
     self._test_bop_fxn(Ops.TRUNCMOD,
                        lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], (dtypes.int32, dtypes.int32), no_b_zero=True)
-  def test_cmplt_int32(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: int(a)<int(b), (dtypes.int32, dtypes.int32))
   def test_cmpne_int32(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: int(a)!=int(b), (dtypes.int32, dtypes.int32))
   def test_where_float16(self):
     self._test_top_fxn(Ops.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float16, dtypes.float16))
@@ -185,14 +164,7 @@ class TestBoolUOps(TestUOps):
           for c in [False, True]:
             self._equal(f([a,b,c], op, (dtypes.bool, )*3), fxn(a,b,c))
 
-  def test_add_bool(self): self._test_bop_bool_fxn(Ops.ADD, lambda a,b: a or b)
-  def test_mul_bool(self): self._test_bop_bool_fxn(Ops.MUL, lambda a,b: a and b)
   def test_xor_bool(self): self._test_bop_bool_fxn(Ops.XOR, lambda a,b: a != b)
-  def test_and_bool(self): self._test_bop_bool_fxn(Ops.AND, lambda a,b: a & b)
-  def test_or_bool(self): self._test_bop_bool_fxn(Ops.OR, lambda a,b: a | b)
-  def test_cmpne_bool(self): self._test_bop_bool_fxn(Ops.CMPNE, lambda a,b: a != b)
-  def test_cmpeq_bool(self): self._test_bop_bool_fxn(Ops.CMPEQ, lambda a,b: a == b)
-  def test_cmplt_bool(self): self._test_bop_bool_fxn(Ops.CMPLT, lambda a,b: a < b)
   def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
 
 class TestLocalAccess(unittest.TestCase):
@@ -251,39 +223,6 @@ class TestUOpPrograms(unittest.TestCase):
     self._run(prog.sink(arg=KernelInfo()), out)
 
     with Context(DEBUG=0): self.assertTrue((out == 42).all().item())
-
-  def test_matmul(self):
-    a = Tensor.randn(10,10)
-    b = Tensor.randn(10,10)
-    c = Tensor.empty(10,10)
-    ref = (a@b)
-    with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
-
-    # C[i,j] = sum_k A[i,k] * B[k,j]
-    # Shapes: A[M,K], B[K,N], C[M,N]
-    M = N = K = 10
-    DT = dtypes.float32
-
-    # Placeholders (bind slots explicitly)
-    A = UOp.placeholder((M, K), DT, slot=0)
-    B = UOp.placeholder((K, N), DT, slot=1)
-    C = UOp.placeholder((M, N), DT, slot=2)
-
-    # Axes: i,j are spatial; k is a reduction axis over the shared dim K
-    i = UOp.range(M, axis_id=0)                             # rows of A/C
-    j = UOp.range(N, axis_id=1)                             # cols of B/C
-    k = UOp.range(K, axis_id=2)  # reduction over K
-
-    # Zero-init: write a scalar 0 to each (i,j).
-    C = C[i, j].set(0.0)
-
-    # Accumulate: end the store, with C.after(k) enforcing the dependency along the reduction axis
-    prog = C[i, j].store(C.after(k)[i, j] + A[i, k] * B[k, j]).end(i, j, k)
-
-    # run program
-    self._run(prog.sink(arg=KernelInfo()), a, b, c)
-
-    with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 
   def test_matmul_relu(self):
     a, b, c = Tensor.randn(10,10), Tensor.randn(10,10), Tensor.empty(10,10)

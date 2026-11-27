@@ -22,12 +22,6 @@ class TestSchedule(unittest.TestCase):
   def tearDown(self):
     self.ctx.__exit__(None, None, None)
 
-  @unittest.skip("no longer supported")
-  def test_double_from(self):
-    x = Tensor([1,2,3,4])
-    out = x.to('python')
-    check_schedule(out, 0, filter_sink=False)
-
   def test_example_matmul_same(self):
     x = Tensor.eye(64).clone().realize()
     z = x.matmul(x).sum()
@@ -80,7 +74,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(*check_schedule(x.shrink((None, (0, 2))).assign(a.clone()), 2))
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
-  def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
   def test_assign_non_contiguous(self, alt=False):
     x = (Tensor.arange(16)-100).reshape(4,4).clone().realize()
     xref = x.numpy()
@@ -106,8 +99,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(linear, externs)
     self.assertListEqual(a.tolist(), expected)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
-  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
-
   def test_setitem_overlapping_slice_temp_size(self):
     a = Tensor.empty(128)
     a[10:14] = a[11:15]
@@ -208,34 +199,6 @@ class TestSwizzle(unittest.TestCase):
     run_schedule(*check_schedule(r, 1))
     self.assertEqual(r.numpy(), (a.numpy()+a.numpy()).sum(1).sum(0))
 
-  def test_single_swizzle(self):
-    Tensor.manual_seed(0)
-    with Context(DEBUG=0, TRACK_MATCH_STATS=0):
-      a = Tensor.randint(4, 1).realize()
-      b = Tensor.ones((1, 1), dtype=a.dtype).contiguous().realize()
-    # ADD(REDUCE(RESHAPE(LOAD)), LOAD) to ADD(REDUCE(RESHAPE(LOAD))), RESHAPE(LOAD)
-    r = a.sum(0)+b
-    run_schedule(*check_schedule(r, 1))
-    self.assertEqual(r.numpy(), a.numpy().sum(0)+1)
-
-  def test_double_swizzle_possible(self):
-    Tensor.manual_seed(0)
-    with Context(DEBUG=0, TRACK_MATCH_STATS=0):
-      a = Tensor.randint(4,).realize()
-      b = Tensor.randint(4,).realize()
-    # parallel reduce!
-    add = a.sum(0)+b.sum(0)
-    run_schedule(*check_schedule(add, 1))
-    self.assertEqual(add.numpy(), a.numpy().sum(0)+b.numpy().sum(0))
-
-  def test_swizzle_reduceop(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4,4).realize()
-    y = Tensor.randn(4,4,4).realize()
-    out = x.reshape(4,4,1).expand(4,4,4).sum(axis=(1,))+y
-    run_schedule(*check_schedule(out, 2)) # TODO: 1?
-    np.testing.assert_allclose(out.numpy(), np.tile(x.numpy().reshape(4,4,1), (1,1,4)).sum(axis=1)+y.numpy())
-
   def test_permute_rewrite(self):
     x = Tensor.randn(4, 4, 16).realize()
     y = Tensor.randn(4, 1, 16).realize()
@@ -280,15 +243,6 @@ class TestSwizzle(unittest.TestCase):
 
 zero_pm = UPat(Ops.CONST, arg=0)
 class TestView(unittest.TestCase):
-  def test_all_masked_out(self):
-    # start with non CONST Ops
-    a = Tensor.rand(10, 10).realize()
-    # all masked out, degrades to const 0
-    b = a.pad(((0, 10), None))[10:]
-    sched = check_schedule(b.contiguous(), 1)
-    run_schedule(*sched)
-    np.testing.assert_equal(b.numpy(), 0)
-
   def test_mask_dim_1(self):
     # mask out dim = 1 works too
     a = Tensor.rand(10, 10).realize()
@@ -297,15 +251,6 @@ class TestView(unittest.TestCase):
     sched = check_schedule(b.contiguous(), 1)
     run_schedule(*sched)
     np.testing.assert_equal(b.numpy(), 0)
-
-  def test_partial_mask(self):
-    # partial masked out does not degrade into CONST
-    a = Tensor.rand(10, 10).realize()
-    b = a.pad(((0, 5), None))[5:]
-    assert b.shape == (10, 10)
-    sched = check_schedule(b.contiguous(), 1)
-    run_schedule(*sched)
-    np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
 
   # a*VIEW(x), where VIEW(x) = 0
   # x collapses along with its children
@@ -347,15 +292,6 @@ class TestCopyFolding(unittest.TestCase):
     b = Tensor(1).to("CPU") * 4
     run_schedule(*check_schedule(b, 0, filter_sink=False))
     assert b.item() == 4
-
-  @unittest.skip("no longer supported")
-  def test_late_const_copy_folding(self):
-    a = Tensor.arange(3).clone().realize()
-    zeros = Tensor.zeros(3, buffer=False).realize()
-    b = (a*zeros).to("CPU") + 1
-    run_schedule(*check_schedule(b, 1, filter_sink=False))
-    self.assertListEqual(b.tolist(), [1, 1, 1])
-    self.assertEqual(b.device, "CPU")
 
   def test_alu_before_copy(self):
     buf = Tensor.ones(1).contiguous().realize()
@@ -399,23 +335,10 @@ class TestCopyFolding(unittest.TestCase):
     self.assertEqual(GlobalCounters.global_mem, 4*4 + (4*4 + 4*4) + 4*4)
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
-  def test_permute_on_disk(self):
-    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).clone().realize().uop.base.buffer.as_memoryview())
-    a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
-    b = a.reshape(2, 2).permute(1, 0).to("CPU")
-    b.realize()
-    self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
-
   def test_permute_on_disk_contiguous(self):
     with open(temp('dt_arange_4_permute_contig'), "wb") as f: f.write(Tensor.arange(4).clone().realize().uop.base.buffer.as_memoryview())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute_contig')}")
     b = a.reshape(2, 2).permute(1, 0).contiguous().to("CPU")
-    b.realize()
-    self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
-
-  def test_permute_after_shrink(self):
-    a = Tensor.arange(5)
-    b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 

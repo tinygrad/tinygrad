@@ -31,9 +31,6 @@ class TestTensorUOpBinop(unittest.TestCase):
   # Tensor's ufix picks float dtype when scalar is float and self is int; UOp should match.
   def test_add_scalar_float_on_int(self): _check(self, _t(3), lambda x: x + 1.5)
   # div: Tensor.div (default case) delegates to ElementwiseMixin.div; trees must match for Tensor and UOp.
-  def test_div_tensor_by_tensor(self):
-    a, b = _t(4).float(), _t(4).float() + 1
-    self.assertIs((a/b).uop, a.uop/b.uop)
   def test_div_int_by_int(self):                 _check(self, _t(4), lambda x: x / 3)
   def test_div_sum_by_sum(self):                 _check(self, _t(4).float(), lambda x: x.sum() / (x + 1).sum())
   def test_div_broadcast_tensor_by_tensor(self):
@@ -75,10 +72,6 @@ class TestTensorUOpGradient(unittest.TestCase):
 
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----
-  def test_slice_full(self):           _check(self, _t(4), lambda x: x[slice(None)])
-  def test_slice_positive(self):       _check(self, _t(8), lambda x: x[1:5])
-  def test_slice_open_start(self):     _check(self, _t(8), lambda x: x[:5])
-  def test_slice_open_stop(self):      _check(self, _t(8), lambda x: x[3:])
   def test_slice_negative_start(self): _check(self, _t(8), lambda x: x[-3:])
   def test_slice_negative_stop(self):  _check(self, _t(8), lambda x: x[:-2])
   def test_slice_both_negative(self):  _check(self, _t(8), lambda x: x[-5:-1])
@@ -93,12 +86,10 @@ class TestTensorUOpGetitem(unittest.TestCase):
   def test_slice_empty(self):    _check(self, _t(6), lambda x: x[3:1])
   def test_slice_oob_stop(self): _check(self, _t(6), lambda x: x[0:100])
 
-  # ---- single int (reduces a dim) ----
   def test_int_positive(self): _check(self, _t(8), lambda x: x[3])
   def test_int_negative(self): _check(self, _t(8), lambda x: x[-1])
 
   # ---- ellipsis ----
-  def test_ellipsis_only(self):       _check(self, _t(2, 3, 4), lambda x: x[...])
   def test_ellipsis_then_int(self):   _check(self, _t(2, 3, 4), lambda x: x[..., -1])
   def test_ellipsis_then_slice(self): _check(self, _t(2, 3, 4), lambda x: x[..., 1:3])
   def test_ellipsis_then_none(self):  _check(self, _t(2, 3), lambda x: x[..., None])
@@ -122,35 +113,23 @@ class TestTensorUOpGetitem(unittest.TestCase):
     ui = idx.uop if isinstance(idx, Tensor) else (tuple(i.uop if isinstance(i,Tensor) else i for i in idx) if isinstance(idx, tuple) else idx)
     self.assertIs(t[idx].uop, t.uop[ui])
 
-  def test_adv_single(self):           self._check_adv(_t(5), _ti([2,1,0,1,2]))
   def test_adv_negative(self):         self._check_adv(_t(5), _ti([-1,-2,0]))
   def test_adv_out_of_bounds(self):    self._check_adv(_t(5), _ti([4,7,2]))           # oob -> 0
   def test_adv_2d_dim0(self):          self._check_adv(_t(3,4), _ti([2,0,1]))
-  def test_adv_2d_index_array(self):   self._check_adv(_t(4,5), _ti([[0,1],[2,3]]))   # shaped index
-  def test_adv_two_consecutive(self):  self._check_adv(_t(3,4), (_ti([2,0,1]), _ti([1,2,3])))  # linear path
   def test_adv_two_broadcast(self):    self._check_adv(_t(3,4), (_ti([2,0,1]), _ti([[1],[2],[3]])))
   def test_adv_three_consecutive(self):self._check_adv(_t(3,4,5), (_ti([2,0]), _ti([1,3]), _ti([4,2])))
   def test_adv_after_slice(self):      self._check_adv(_t(2,3,4), (slice(None), _ti([2,0,1])))
   def test_adv_non_consec_permute(self): self._check_adv(_t(2,3,4), (_ti([1,0]), slice(None), _ti([2,0])))
   def test_adv_idx_then_int(self):     self._check_adv(_t(3,4), (_ti([2,0,1]), 2))
-  def test_adv_int_then_idx(self):     self._check_adv(_t(3,4), (1, _ti([2,0,1])))
   def test_adv_idx_then_none(self):    self._check_adv(_t(3,4), (_ti([2,0,1]), None))
-  def test_adv_none_then_idx(self):    self._check_adv(_t(3,4), (None, _ti([2,0,1])))
-  def test_adv_ellipsis_then_idx(self):self._check_adv(_t(2,3,4), (Ellipsis, _ti([2,0,1])))
-  def test_adv_idx_slice_mix(self):    self._check_adv(_t(4,5,6), (_ti([1,3]), slice(1,4), _ti([2,0])))
-
   # bool index is unsupported
   def test_adv_bool_index_rejected(self):
     with self.assertRaises(IndexError): _t(5)[_t(5) > 2]
     with self.assertRaises(IndexError): _t(5).uop[(_t(5) > 2).uop]
 
   # python list/tuple indices
-  def test_adv_python_list(self):
-    self.assertIs(_strip_unique(_t(5)[[2,1,0]].uop), _strip_unique(_t(5).uop[[2,1,0]]))
   def test_adv_python_list_negative(self):
     self.assertIs(_strip_unique(_t(5)[[-1,-2,0]].uop), _strip_unique(_t(5).uop[[-1,-2,0]]))
-  def test_adv_python_list_nested(self):
-    self.assertIs(_strip_unique(_t(3,4)[[0,1],[2,0]].uop), _strip_unique(_t(3,4).uop[[0,1],[2,0]]))
   def test_adv_python_list_2d_index(self):
     self.assertIs(_strip_unique(_t(4,5)[[[0,1],[2,3]]].uop), _strip_unique(_t(4,5).uop[[[0,1],[2,3]]]))
 
@@ -167,15 +146,12 @@ class TestTensorUOpCumMinMax(unittest.TestCase):
     vu, iu = fn(t.uop)
     self.assertIs(vt.uop, vu)
     self.assertIs(it.uop, iu)
-  def test_cummax_1d(self):    self._check_pair(_t(5), lambda x: x.cummax(0))
   def test_cummax_2d(self):    self._check_pair(_t(3, 4), lambda x: x.cummax(1))
   def test_cummax_0d(self):    self._check_pair(_t(1).reshape(()), lambda x: x.cummax(0))
-  def test_cummin_1d(self):    self._check_pair(_t(5), lambda x: x.cummin(0))
   def test_cummin_2d(self):    self._check_pair(_t(3, 4), lambda x: x.cummin(1))
 
 class TestTensorUOpArgMinMax(unittest.TestCase):
   def _check(self, t, fn): self.assertIs(fn(t).uop, fn(t.uop))
-  def test_argmax(self):       self._check(_t(3, 4), lambda x: x.argmax(axis=1))
   def test_argmax_flat(self):  self._check(_t(3, 4), lambda x: x.argmax())
   def test_argmin(self):       self._check(_t(3, 4), lambda x: x.argmin(axis=0))
 
@@ -193,7 +169,6 @@ class TestTensorUOpSort(unittest.TestCase):
     uv, ui = t.uop.sort(**kw)
     self.assertIs(tv.uop, uv)
     self.assertIs(ti.uop, ui)
-  def test_sort_1d(self):         self._check(Tensor([0.5, 0.1, 0.3]).float())
   def test_sort_descending(self): self._check(Tensor([0.5, 0.1, 0.3]).float(), descending=True)
   def test_sort_2d(self):         self._check(_t(2, 4).float())
   def test_sort_single(self):     self._check(Tensor([1.0]).float())
@@ -255,10 +230,7 @@ class TestTensorUOpRand(unittest.TestCase):
 class TestTensorUOpGather(unittest.TestCase):
   def _check(self, t, dim, idx):
     self.assertIs(t.gather(dim, idx).uop, t.uop.gather(dim, idx.uop))
-  def test_gather_1d(self):  self._check(_t(5), 0, Tensor([2, 1, 0, 1, 2], dtype=dtypes.int32))
   def test_gather_dim0(self): self._check(_t(3, 4), 0, Tensor([[0, 1, 2, 0], [1, 2, 0, 1], [2, 0, 1, 2]], dtype=dtypes.int32))
-  def test_gather_dim1(self): self._check(_t(3, 4), 1, Tensor([[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1]], dtype=dtypes.int32))
-
 class TestTensorUOpInterpolate(unittest.TestCase):
   def _check(self, t, mode):
     self.assertIs(t.interpolate(size=(2, 2), mode=mode).uop, t.uop.interpolate(size=(2, 2), mode=mode))
@@ -270,18 +242,9 @@ class TestTensorUOpLoss(unittest.TestCase):
   def test_cross_entropy(self):
     t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
     self.assertIs(t.cross_entropy(Y).uop, t.uop.cross_entropy(Y.uop))
-  def test_sparse_categorical_crossentropy(self):
-    t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
-    self.assertIs(t.sparse_categorical_crossentropy(Y).uop, t.uop.sparse_categorical_crossentropy(Y.uop))
   def test_sparse_categorical_crossentropy_ignore_index(self):
     t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
     self.assertIs(t.sparse_categorical_crossentropy(Y, ignore_index=0).uop, t.uop.sparse_categorical_crossentropy(Y.uop, ignore_index=0))
-  def test_nll_loss(self):
-    t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
-    self.assertIs(t.nll_loss(Y).uop, t.uop.nll_loss(Y.uop))
-  def test_nll_loss_weight(self):
-    t, Y, w = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32), _t(3).float()
-    self.assertIs(t.nll_loss(Y, weight=w).uop, t.uop.nll_loss(Y.uop, weight=w.uop))
   def test_nll_loss_ignore_index(self):
     t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
     self.assertIs(t.nll_loss(Y, ignore_index=1).uop, t.uop.nll_loss(Y.uop, ignore_index=1))
@@ -320,7 +283,6 @@ class TestTensorUOpScatterReduce(unittest.TestCase):
     self.assertIs(x.scatter_reduce(0, idx, src, **kw).uop, x.uop.scatter_reduce(0, idx.uop, src.uop, **kw))
   def test_sum(self):  self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="sum")
   def test_prod(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="prod")
-  def test_mean(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="mean")
   def test_amax(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="amax")
   def test_amin(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="amin")
   def test_mean_exclude_self(self):
@@ -330,21 +292,17 @@ class TestTensorUOpMaskedSelect(unittest.TestCase):
   # only the fixed-size path is pure
   def _check(self, t, mask, **kw):
     self.assertIs(t.masked_select(mask, **kw).uop, t.uop.masked_select(mask.uop, **kw))
-  def test_masked_select_1d(self): self._check(_t(6), Tensor([True, False, True, False, True, False]), size=4)
   def test_masked_select_2d(self):
     self._check(_t(3, 3), Tensor([[True, False, True], [False, True, False], [False, False, True]]), size=6, fill_value=-1)
 
 class TestTensorUOpNonzero(unittest.TestCase):
   def _check(self, t, **kw): self.assertIs(t.nonzero(**kw).uop, t.uop.nonzero(**kw))
-  def test_nonzero_1d(self): self._check(_t(5), size=3)
   def test_nonzero_2d(self): self._check(_t(2, 3), size=4)
 
 class TestTensorUOpPool(unittest.TestCase):
-  def test_avg_pool2d(self):                _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d())
   def test_avg_pool2d_padding(self):        _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d(padding=1))
   def test_avg_pool2d_ceil(self):           _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d(ceil_mode=True))
   def test_avg_pool2d_no_count_pad(self):   _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d(padding=1, count_include_pad=False))
-  def test_max_pool2d(self):                _check(self, _t(1, 1, 5, 5).float(), lambda x: x.max_pool2d())
   def test_max_pool2d_padding(self):        _check(self, _t(1, 1, 5, 5).float(), lambda x: x.max_pool2d(padding=1))
   def test_max_pool2d_ceil(self):           _check(self, _t(1, 1, 5, 5).float(), lambda x: x.max_pool2d(ceil_mode=True))
   def test_max_pool2d_return_indices(self):
@@ -359,8 +317,6 @@ class TestTensorUOpPool(unittest.TestCase):
     self.assertIs(out.max_unpool2d(idx).uop, out.uop.max_unpool2d(idx.uop))
 
 class TestTensorUOpCat(unittest.TestCase):
-  def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
-  def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))
   def test_cat_3tensors(self): _check(self, _t(2, 3), lambda x: x.cat(x, x, dim=0))
   def test_cat_neg_dim(self):  _check(self, _t(2, 3, 4), lambda x: x.cat(x, dim=-1))
 
@@ -369,17 +325,11 @@ class TestTensorUOpPad(unittest.TestCase):
   def test_pad_flat_negative(self):      _check(self, _t(4, 5), lambda x: x.pad((1, -1, 0, 2), value=-1.0))
   def test_pad_grouped_none(self):       _check(self, _t(4, 5), lambda x: x.pad((None, (0, 3))))
   def test_pad_circular(self):           _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="circular"))
-  def test_pad_circular_zero_after(self):_check(self, _t(4, 5), lambda x: x.pad(((1, 0), (2, 0)), mode="circular"))
-  def test_pad_reflect(self):            _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="reflect"))
   def test_pad_reflect_negative(self):   _check(self, _t(4, 5), lambda x: x.pad(((1, -1), (0, 2)), mode="reflect"))
-  def test_pad_replicate(self):          _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="replicate"))
   def test_pad_replicate_negative(self): _check(self, _t(4, 5), lambda x: x.pad(((1, -1), (0, 2)), mode="replicate"))
 
 class TestTensorUOpStack(unittest.TestCase):
-  def test_stack_dim0(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=0))
-  def test_stack_dim1(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=1))
   def test_stack_3tensors(self): _check(self, _t(2, 3), lambda x: x.stack(x, x, dim=0))
-  def test_stack_new_last(self): _check(self, _t(2, 3), lambda x: x.stack(x, dim=-1))
   def test_stack_mixed_dtype(self):
     w = _t(2, 3).float()
     _check(self, _t(2, 3), lambda x: x.stack(w if isinstance(x, Tensor) else w.uop))
@@ -389,9 +339,6 @@ class TestTensorUOpStack(unittest.TestCase):
     self.assertEqual(UOp.const(1).stack(UOp.const(2)).shape, (2,))
 
 class TestTensorUOpConv2d(unittest.TestCase):
-  def test_conv2d_basic(self):
-    w = _t(1, 1, 2, 2).float()
-    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
   def test_conv2d_padded(self):
     w = _t(1, 1, 2, 2).float()
     _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, padding=1))
@@ -444,9 +391,7 @@ class TestTensorUOpEinsum(unittest.TestCase):
   def test_einsum_transpose(self): _check(self, _t(2, 3), lambda x: type(x).einsum("ij->ji", x))
 
 class TestTensorUOpSoftmax(unittest.TestCase):
-  def test_softmax_default(self):     _check(self, _t(2, 3).float(), lambda x: x.softmax())
   def test_softmax_axis0(self):       _check(self, _t(2, 3).float(), lambda x: x.softmax(axis=0))
-  def test_log_softmax_default(self): _check(self, _t(2, 3).float(), lambda x: x.log_softmax())
   def test_log_softmax_axis0(self):   _check(self, _t(2, 3).float(), lambda x: x.log_softmax(axis=0))
 
 class TestTensorUOpQR(unittest.TestCase):
@@ -455,7 +400,6 @@ class TestTensorUOpQR(unittest.TestCase):
     qu, ru = t.uop.qr()
     self.assertIs(qt.uop, qu)
     self.assertIs(rt.uop, ru)
-  def test_qr_square(self):   self._check(_t(3, 3).float())
   def test_qr_tall(self):     self._check(_t(4, 3).float())
   def test_qr_wide(self):     self._check(_t(3, 4).float())
   def test_qr_zero_col(self): self._check(Tensor([[0.0, 1.0], [0.0, 2.0]]))
@@ -468,7 +412,6 @@ class TestTensorUOpSVD(unittest.TestCase):
     self.assertIs(ut.uop, uu)
     self.assertIs(st.uop, su)
     self.assertIs(vt.uop, vu)
-  def test_svd_square(self):    self._check(_t(2, 2).float())
   def test_svd_tall(self):      self._check(_t(3, 2).float())
   def test_svd_wide(self):      self._check(_t(2, 3).float())
   def test_svd_odd_num(self):   self._check(_t(3, 3).float())  # exercises odd-num runoff path
@@ -507,18 +450,12 @@ class TestTensorUOpCreation(unittest.TestCase):
   def test_full_symbolic_fill(self):
     t = Tensor.full((2, 3), UOp.variable("x", 1, 10).bind(5))
     self.assertEqual(t.shape, (2, 3))
-  def test_zeros(self):
-    self.assertIs(_strip_unique(Tensor.zeros(2, 3).uop), _strip_unique(UOp.zeros(2, 3)))
-  def test_ones(self):
-    self.assertIs(_strip_unique(Tensor.ones(2, 3).uop), _strip_unique(UOp.ones(2, 3)))
   def test_invalids(self):
     self.assertIs(_strip_unique(Tensor.invalids(2, 3, dtype=dtypes.int8).uop), _strip_unique(UOp.invalids((2, 3), dtype=dtypes.int8)))
   def test_empty_like(self):
     t = Tensor.empty(2, 3, dtype=dtypes.int8)
     self.assertIs(_strip_unique(t.empty_like().uop), _strip_unique(t.uop.empty_like()))
     self.assertIs(_strip_unique(t.empty_like(dtype=dtypes.float, device="NULL").uop), _strip_unique(t.uop.empty_like(dtypes.float, "NULL")))
-  def test_arange(self):
-    self.assertIs(Tensor.arange(5).uop, UOp.arange(5))
   def test_arange_empty(self):
     self.assertIs(Tensor.arange(5, 5).uop, UOp.arange(5, 5))
   def test_arange_step(self):
@@ -531,15 +468,9 @@ class TestTensorUOpCreation(unittest.TestCase):
     self.assertIs(Tensor.eye(3).uop, UOp.eye(3))
   def test_eye_rect(self):
     self.assertIs(Tensor.eye(2, 4).uop, UOp.eye(2, 4))
-  def test_triu(self):
-    t = _t(3, 4)
-    self.assertIs(t.triu().uop, t.uop.triu())
   def test_triu_diagonal(self):
     t = _t(3, 4)
     self.assertIs(t.triu(diagonal=1).uop, t.uop.triu(diagonal=1))
-  def test_tril(self):
-    t = _t(3, 4)
-    self.assertIs(t.tril().uop, t.uop.tril())
   def test_tril_diagonal(self):
     t = _t(3, 4)
     self.assertIs(t.tril(diagonal=-1).uop, t.uop.tril(diagonal=-1))

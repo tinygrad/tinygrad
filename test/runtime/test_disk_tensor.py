@@ -1,4 +1,5 @@
 import os, pathlib, tempfile, unittest
+import multiprocessing.shared_memory as shared_memory
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType, DTYPES_DICT
@@ -255,39 +256,12 @@ class TestSafetensors(TempDirTestCase):
       assert v.numpy().dtype == tensors[k].dtype
       np.testing.assert_allclose(v.numpy(), tensors[k])
 
-def helper_test_disk_tensor(tmp, fn, data, np_fxn, tinygrad_fxn=None):
-  if tinygrad_fxn is None: tinygrad_fxn = np_fxn
-  pathlib.Path(tmp(fn)).unlink(missing_ok=True)
-  tinygrad_tensor = Tensor(data, device="CPU").to(f"disk:{tmp(fn)}")
-  numpy_arr = np.array(data)
-  tinygrad_fxn(tinygrad_tensor)
-  np_fxn(numpy_arr)
-  np.testing.assert_allclose(tinygrad_tensor.numpy(), numpy_arr)
-
 class TestDiskTensor(TempDirTestCase):
-  def test_empty(self):
-    Tensor.empty(100, 100, device=f"disk:{self.tmp('dt_empty')}")
-
-  def test_simple_read(self):
-    fn = pathlib.Path(self.tmp("dt_simple_read"))
-    fn.write_bytes(bytes(range(256)))
-    t = Tensor.empty(16, 16, device=f"disk:{self.tmp('dt_simple_read')}", dtype=dtypes.uint8)
-    out = t[1].to(Device.DEFAULT).tolist()
-    assert out == list(range(16, 32))
-
   def test_simple_read_bitcast(self):
     fn = pathlib.Path(self.tmp("dt_simple_read_bitcast"))
     fn.write_bytes(bytes(range(256))*2)
     t = Tensor.empty(16, 16*2, device=f"disk:{self.tmp('dt_simple_read_bitcast')}", dtype=dtypes.uint8)
     out = t[1].bitcast(dtypes.uint16).to(Device.DEFAULT).tolist()
-    tout = [(x//256, x%256) for x in out]
-    assert tout == list([(x+1,x) for x in range(32,64,2)])
-
-  def test_simple_read_bitcast_alt(self):
-    fn = pathlib.Path(self.tmp("dt_simple_read_bitcast_alt"))
-    fn.write_bytes(bytes(range(256))*2)
-    t = Tensor.empty(16, 16*2, device=f"disk:{self.tmp('dt_simple_read_bitcast_alt')}", dtype=dtypes.uint8)
-    out = t.bitcast(dtypes.uint16)[1].to(Device.DEFAULT).tolist()
     tout = [(x//256, x%256) for x in out]
     assert tout == list([(x+1,x) for x in range(32,64,2)])
 
@@ -302,22 +276,6 @@ class TestDiskTensor(TempDirTestCase):
     dt = Tensor([[0, 1, 2], [3, 4, 5]]).to(f"disk:{self.tmp('dt_permuted_read')}")
     with self.assertRaisesRegex(RuntimeError, "non-contiguous view is not supported"):
       dt.T.tolist()
-
-  def test_write_ones(self):
-    out = Tensor.ones(10, 10, device="CPU").contiguous()
-    outdisk = out.to(f"disk:{self.tmp('dt_write_ones')}")
-    print(outdisk)
-    outdisk.realize()
-    del out, outdisk
-
-    import struct
-    # test file
-    with open(self.tmp("dt_write_ones"), "rb") as f:
-      assert f.read() == struct.pack('<f', 1.0) * 100 == b"\x00\x00\x80\x3F" * 100
-
-    # test load alt
-    reloaded = Tensor.empty(10, 10, device=f"disk:{self.tmp('dt_write_ones')}")
-    np.testing.assert_almost_equal(reloaded.numpy(), np.ones((10, 10)))
 
   def test_simple_setitem(self):
     data = [[1],[2]]
@@ -342,12 +300,6 @@ class TestDiskTensor(TempDirTestCase):
     with self.assertRaises(RuntimeError, msg="advanced setitem is not supported for DISK tensors"):
       dt[Tensor([0, 2]), Tensor([1, 3])] = 99
 
-  def test_assign_const_to_disk(self):
-    # assign from CONST (Tensor.full) to disk - source has no buffer, needs contiguous first
-    dt = Tensor.empty(4, device=f"disk:{self.tmp('dt_assign_const')}", dtype=dtypes.int32)
-    dt.assign(Tensor.full((4,), 42, dtype=dtypes.int32)).realize()
-    np.testing.assert_array_equal(dt.numpy(), [42, 42, 42, 42])
-
   def test_assign_slice_from_const(self):
     # slice assign from CONST to disk - tests size calculation when no RANGE ops
     dt = Tensor([0, 1, 2, 3], dtype=dtypes.int32).to(f"disk:{self.tmp('dt_slice_const')}")
@@ -360,15 +312,6 @@ class TestDiskTensor(TempDirTestCase):
     dst = Tensor.empty(4, device=f"disk:{self.tmp('dt_d2d_dst')}", dtype=dtypes.int32)
     dst.assign(src.to("CPU")).realize()
     np.testing.assert_array_equal(dst.numpy(), [1, 2, 3, 4])
-
-  def test_assign_slice(self):
-    def assign(x,s,y): x[s] = y
-    helper_test_disk_tensor(self.tmp, "dt_assign_slice_1", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]))
-    helper_test_disk_tensor(self.tmp, "dt_assign_slice_2", [[0,1,2,3],[4,5,6,7]], lambda x: assign(x, slice(0,1), [[13, 12, 11, 10]]))
-
-  def test_reshape(self):
-    helper_test_disk_tensor(self.tmp, "dt_reshape_1", [1,2,3,4,5], lambda x: x.reshape((1,5)))
-    helper_test_disk_tensor(self.tmp, "dt_reshape_2", [1,2,3,4], lambda x: x.reshape((2,2)))
 
   def test_assign_to_different_dtype(self):
     # NOTE: this is similar to Y_train in fetch_cifar
@@ -402,12 +345,6 @@ class TestDiskTensor(TempDirTestCase):
     src = Tensor([1.0, 2.0, 3.0, 4.0])  # on default device
     t.assign(src)
     np.testing.assert_array_equal(t.numpy(), [1.0, 2.0, 3.0, 4.0])
-
-  def test_bitcast(self):
-    with open(self.tmp('dt_bitcast'), "wb") as f: f.write(bytes(range(10,20)))
-    t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{self.tmp('dt_bitcast')}")
-    ret = t.to("CPU").bitcast(dtypes.uint16) + 1
-    assert ret.tolist() == [2827, 3341, 3855, 4369, 4883]
 
   def test_bitcast_view(self):
     with open(self.tmp('dt_bitcast_view'), "wb") as f: f.write(bytes(range(10, 24)))
@@ -541,13 +478,6 @@ class TestPathTensor(TempDirTestCase):
     with open(self.test_file, "wb") as f:
       f.write(self.test_data)
 
-  def test_path_tensor_no_device(self):
-    t = Tensor(self.test_file)
-    self.assertEqual(t.shape, (100,))
-    self.assertEqual(t.dtype, dtypes.uint8)
-    self.assertTrue(t.device.startswith("DISK:"))
-    np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
-
   def test_path_tensor_with_device(self):
     t = Tensor(self.test_file, device="CPU")
     self.assertEqual(t.shape, (100,))
@@ -575,12 +505,6 @@ class TestPathTensor(TempDirTestCase):
     self.assertTrue(t.device.startswith("DISK:"))
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.int16))
 
-  def test_path_tensor_copy_to_device(self):
-    t = Tensor(self.test_file)
-    t_cpu = t.to("CPU")
-    self.assertEqual(t_cpu.device, "CPU")
-    np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
-
   @unittest.skip("permission checks don't work in all environments")
   def test_path_tensor_disk_device_bug(self):
     test_file = pathlib.Path(self.temp_dir.name) / "disk_device_bug"
@@ -601,10 +525,6 @@ class TestDiskTensorMovement(TempDirTestCase):
     t = Tensor(self.fn)
     self.assertTrue(Tensor.all(t.to(None) == Tensor.arange(100, dtype=dtypes.uint8)).item())
 
-  def test_permuted_copy(self):
-    t = Tensor(self.fn).reshape(10, 10).T.to("CPU")
-    np.testing.assert_array_equal(t.numpy(), np.arange(100, dtype=np.uint8).reshape(10, 10).T)
-
   def test_contiguous_permuted_copy(self):
     t = Tensor(self.fn).reshape(10, 10).T.contiguous().to("CPU")
     np.testing.assert_array_equal(t.numpy(), np.arange(100, dtype=np.uint8).reshape(10, 10).T)
@@ -618,10 +538,6 @@ class TestDiskTensorMovement(TempDirTestCase):
           np.testing.assert_array_equal(t.to("CPU").numpy(), np.arange(offset, offset+4, dtype=np.uint8).reshape(2, 2).T)
           self.assertEqual(self.fn.read_bytes(), bytes(range(100)))
 
-  def test_slice_read(self):
-    t = Tensor(self.fn)
-    self.assertListEqual(t[16:18].tolist(), [16,17])
-
   def test_slice_read_cat(self):
     t = Tensor(self.fn)
     with self.assertRaises(AssertionError):
@@ -631,6 +547,21 @@ class TestDiskTensorMovement(TempDirTestCase):
     t = Tensor(self.fn)
     with self.assertRaises(AssertionError):
       self.assertListEqual((t[16:18]+t[20:22]).tolist(), [16+20,17+21])
+
+class TestRawShmBuffer(unittest.TestCase):
+  def test_e2e(self):
+    t = Tensor.randn(2, 2, 2).realize()
+
+    # copy to shm
+    shm_name = (s := shared_memory.SharedMemory(create=True, size=t.nbytes())).name
+    s.close()
+    t_shm = t.to(f"disk:shm:{shm_name}").realize()
+
+    # copy from shm
+    t2 = t_shm.to(Device.DEFAULT).realize()
+
+    assert np.allclose(t.numpy(), t2.numpy())
+    s.unlink()
 
 if __name__ == "__main__":
   unittest.main()

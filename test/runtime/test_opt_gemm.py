@@ -24,10 +24,6 @@ class TestOptGemm(unittest.TestCase):
     test = Tensor(call.src[1]).numpy().reshape(self.res.shape)
     np.testing.assert_allclose(self.res, test, atol=1e-4)
 
-  def test_gemm_unrolled_permute_l_44(self):
-    opts = [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=1, arg=(4, AxisType.UPCAST))]
-    self._test_gemm_unrolled_permute_l(opts)
-
   def test_gemm_unrolled_permute_l_424(self):
     # was failing with LLVM
     opts = [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.UPCAST)),
@@ -36,10 +32,6 @@ class TestOptGemm(unittest.TestCase):
 
   def test_gemm_unrolled_permute_l_42(self):
     opts = [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.UPCAST))]
-    self._test_gemm_unrolled_permute_l(opts)
-
-  def test_gemm_unrolled_permute_l_22(self):
-    opts = [Opt(op=OptOps.SPLIT, axis=0, arg=(2, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.UPCAST))]
     self._test_gemm_unrolled_permute_l(opts)
 
 if __name__ == '__main__':

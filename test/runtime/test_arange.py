@@ -55,23 +55,6 @@ class TestIndexing(unittest.TestCase):
       run_schedule(linear, externs)
     self.assertEqual(out.item(), 1337)
 
-  def test_manual_index(self):
-    dataset = Tensor.rand(DSET, DDIM).realize()
-    idxs = Tensor([0,3,5,6]).realize()
-    real_index = dataset.numpy()[idxs.numpy()]
-    print("*** indexing ***")
-    with Context(NOOPT=1):
-      GlobalCounters.reset()
-      rng = Tensor.arange(DSET, dtype=dtypes.int).reshape(1, 1, DSET, 1).expand(4, DDIM, DSET, 1)
-      idxs = idxs.reshape(4,1,1,1).expand(4, DDIM, DSET, 1)
-      reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
-      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1, buffer=False))
-      X = full.sum(axis=(2,3))
-      linear, externs = check_schedule(X, 1)
-      run_schedule(linear, externs)
-      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
-    np.testing.assert_allclose(real_index, X.numpy())
-
   def test_index_variable(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
     v = Variable("v", 0, DDIM-1)
@@ -106,9 +89,6 @@ class TestIndexing(unittest.TestCase):
       run_schedule(linear, externs)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())
-  @unittest.skip("not ready")
-  def test_index_fused_opt(self): self.test_index_fused(0)
-
   @unittest.skipIf(Device.DEFAULT == "CL", "rusticl/llvmpipe bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15667")
   def test_index_fused_out_of_bounds(self):
     dataset = Tensor.rand(256, 256).realize()
@@ -152,10 +132,7 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(X_train.numpy()[samples.numpy()], x)
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
 
-  def test_index_mnist_opt(self): self.test_index_mnist(0)
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
-  def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
-
   def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3)

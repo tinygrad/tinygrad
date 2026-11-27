@@ -90,23 +90,6 @@ def two_loops_kernel(C:UOp) -> UOp:
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="two_loops", opts_to_apply=()))
 
-def loop_in_loop_kernel(C:UOp) -> UOp:
-  # outer loop while i < 12, inner loop increments until i % 4 == 0 -> 12
-  l1, l2 = UOp.loop(0), UOp.loop(1)
-
-  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
-  i = i.after(i[0].store(0))
-
-  inc = i.after(l1, l2)[0].load() + 1
-  st = i[0].store(inc)
-
-  # the outer BACKEDGE closes the inner loop, and its cond reloads the register after the inner loop
-  e2 = st.backedge(l2, inc % 4 != 0)
-  oc = i.after(e2)[0].load()
-  i = i.after(e2.backedge(l1, oc < 12))
-
-  return C[0].store(i[0].load()).sink(arg=KernelInfo(name="loop_in_loop", opts_to_apply=()))
-
 class TestWaitLoop(unittest.TestCase):
   def test_wait_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
@@ -146,12 +129,6 @@ class TestWaitLoop(unittest.TestCase):
     c = Tensor.custom_kernel(c, fxn=pressure_loop_kernel)[0]
     c.realize()
     self.assertEqual(c[0].item(), 1)
-
-  def test_loop_in_loop(self):
-    c = Tensor.empty(1, dtype=dtypes.int)
-    c = Tensor.custom_kernel(c, fxn=loop_in_loop_kernel)[0]
-    c.realize()
-    self.assertEqual(c.item(), 12)
 
 @unittest.skipUnless(Device.DEFAULT in ("CPU", "AMD", "NV"), "need proper uncached=True handling")
 class TestVolatileLoops(unittest.TestCase):

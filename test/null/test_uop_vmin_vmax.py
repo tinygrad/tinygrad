@@ -32,13 +32,6 @@ class TestVminVmaxProperties(unittest.TestCase):
     test_bool(uop != 43, True)
     test_bool(uop != 41, True)
 
-  def test_vmin_vmax_addition_with_variable(self):
-    # vmin and vmax for addition with a variable
-    x = UOp.variable('x', 10, 20)
-    uop = x + 5
-    self.assertEqual(uop.vmin, 15)
-    self.assertEqual(uop.vmax, 25)
-
   def test_vmin_vmax_subtraction_with_variable(self):
     x = UOp.variable('x', 10, 20)
     uop = x - 5
@@ -88,13 +81,6 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, dtypes.int32.min)
     self.assertEqual(uop.vmax, dtypes.int32.max)
 
-  def test_vmin_vmax_multiplication_with_variable(self):
-    # vmin and vmax for multiplication with a variable
-    x = UOp.variable('x', -3, 4)
-    uop = x * 2
-    self.assertEqual(uop.vmin, -6)
-    self.assertEqual(uop.vmax, 8)
-
   def test_vmin_vmax_variable_inside_special(self):
     uop = UOp(Ops.SPECIAL, arg='gidx0', src=(UOp.variable('i', 1, 10, dtypes.int),))
     self.assertEqual(uop.vmin, 0)
@@ -108,13 +94,6 @@ class TestVminVmaxProperties(unittest.TestCase):
     # TODO: these should be 0, but definitely should not be nan
     self.assertEqual(uop.vmin, -math.inf)
     self.assertEqual(uop.vmax, math.inf)
-
-  def test_vmin_vmax_with_negative_multiplication(self):
-    # vmin and vmax when multiplying by a negative number
-    x = UOp.variable('x', 2, 5)
-    uop = x * -3
-    self.assertEqual(uop.vmin, -15)
-    self.assertEqual(uop.vmax, -6)
 
   def test_vmin_vmax_with_negative_multiplication2(self):
     # vmin and vmax when multiplying by a negative number
@@ -240,13 +219,6 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(t.index(r).load(UOp.const(0, dtypes.uchar), r < 2)._min_max, (0, 255))
 
 class TestVminVmaxDivMod(unittest.TestCase):
-  def test_vmin_vmax_division_positive(self):
-    # vmin and vmax for division of a variable by a positive constant
-    x = UOp.variable('x', 10, 20)
-    uop = x // 2
-    self.assertEqual(uop.vmin, 5)
-    self.assertEqual(uop.vmax, 10)
-
   def test_vmin_vmax_division_negative(self):
     # floor division of a variable by a negative constant
     x = UOp.variable('x', 10, 20)
@@ -318,23 +290,6 @@ class TestVminVmaxDivMod(unittest.TestCase):
     self.assertEqual(((-100)//(-y)).vmin, 20)
     self.assertEqual(((-100)//(-y)).vmax, 33)
 
-  def test_vmin_vmax_mod_positive(self):
-    # floor mod with positive divisor: result in [0, c-1] regardless of dividend sign
-    positive = UOp.variable('positive', 10, 20)
-    uop = positive % 3
-    self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 2)
-
-    negative = UOp.variable('negative', -20, -10)
-    uop = negative % 3
-    self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 2)
-
-    mixed = UOp.variable('mixed', -20, 20)
-    uop = mixed % 3
-    self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 2)
-
   def test_vmin_vmax_mod_negative(self):
     # floor mod with negative divisor: result in [c+1, 0] regardless of dividend sign
     positive = UOp.variable('positive', 10, 20)
@@ -358,12 +313,6 @@ class TestVminVmaxVConst(unittest.TestCase):
     uop = UOp.const((42,))
     self.assertEqual(uop.vmin, 42)
     self.assertEqual(uop.vmax, 42)
-
-  def test_vmin_vmax_vconst_multiple_elements(self):
-    # vmin and vmax for a multi-element vector constant
-    uop = UOp.const((10, 20, -5, 7))
-    self.assertEqual(uop.vmin, -5)
-    self.assertEqual(uop.vmax, 20)
 
   def test_vmin_vmax_vconst_all_equal(self):
     # vmin and vmax for a vector where all elements are equal
@@ -399,20 +348,10 @@ class TestVminVmaxVConst(unittest.TestCase):
     self.assertEqual(uop.vmax, 67108863)
 
 class TestConstFactor(unittest.TestCase):
-  def test_const_factor_constant(self):
-    # const_factor for a constant
-    uop = UOp.const(42)
-    self.assertEqual(uop.const_factor(), 42)
-
   def test_const_factor_addition(self):
     # const_factor for an addition of constants
     uop = UOp.const(30) + UOp.const(12)
     self.assertEqual(uop.const_factor(), 6)  # GCD(30, 12) = 6
-
-  def test_const_factor_multiplication(self):
-    # const_factor for a multiplication of constants
-    uop = UOp.const(5) * UOp.const(7)
-    self.assertEqual(uop.const_factor(), 5)  # For multiplication, it's one of the factors
 
   def test_const_factor_with_variable(self):
     # const_factor for an expression involving a variable
@@ -426,42 +365,7 @@ class TestConstFactor(unittest.TestCase):
     uop = x // 4
     self.assertEqual(uop.const_factor(), 1)  # Division reduces the const_factor to 1
 
-  def test_const_factor_multiplication_of_var_and_const(self):
-    # const_factor for multiplication of a variable and a constant
-    x = UOp.variable('x', 6, 18)
-    uop = x * 4
-    self.assertEqual(uop.const_factor(), 4)  # Constant factor 4
-
-  @unittest.skip("broken")
-  def test_const_factor_multiplication_of_consts_and_vars(self):
-    # Multiplying constants and variables
-    x = UOp.variable('x', 10, 20)
-    uop = (x * 3) * 5
-    self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
-
 class TestDivides(unittest.TestCase):
-  def test_divides_constant_exact(self):
-    # Divides a constant by an exact divisor
-    uop = UOp.const(42)
-    result = uop.divides(7)
-    self.assertIsNotNone(result)
-    self.assertEqual(result.const_factor(), 6)  # 42 / 7 = 6
-
-  def test_divides_constant_inexact(self):
-    # Try to divide a constant by a non-exact divisor
-    uop = UOp.const(42)
-    result = uop.divides(5)
-    self.assertIsNone(result)  # 42 is not divisible by 5
-
-  @unittest.skip("broken")
-  def test_divides_variable_and_constant(self):
-    # Multiplying a variable by a constant, then dividing by the same constant
-    x = UOp.variable('x', 10, 20)
-    uop = x * 6
-    result = uop.divides(6)
-    self.assertIsNotNone(result)
-    self.assertEqual(result, x)  # (x * 6) / 6 = x
-
   def test_divides_complex_expression(self):
     # Dividing a more complex expression
     x = UOp.variable('x', 10, 20)

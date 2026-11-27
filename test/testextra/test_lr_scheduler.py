@@ -2,40 +2,12 @@ import numpy as np
 import torch
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.nn.state import get_parameters
 from tinygrad.nn.optim import Adam, SGD
 from tinygrad.helpers import DEBUG, Context
 from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
-from extra.training import train, evaluate
-from extra.datasets import fetch_mnist
 
 np.random.seed(1337)
 Tensor.manual_seed(1337)
-
-class TinyBobNet:
-  def __init__(self):
-    self.l1 = Tensor.scaled_uniform(784, 128)
-    self.l2 = Tensor.scaled_uniform(128, 10)
-
-  def parameters(self):
-    return get_parameters(self)
-
-  def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
-
-def lr_scheduler_training(sched_fn=None, args=None):
-  X_train, Y_train, X_test, Y_test = fetch_mnist()
-  model = TinyBobNet()
-  optim = Adam(model.parameters(), lr=0.01)
-  if sched_fn is not None: sched = sched_fn(optim, **args)
-  for _ in range(25):
-    train(model, X_train, Y_train, optim, 100)
-    if sched_fn is not None:
-      if isinstance(sched, ReduceLROnPlateau):
-        sched.step(evaluate(model, X_test, Y_test))
-      else:
-        sched.step()
-  return evaluate(model, X_test, Y_test)
 
 def current_lr(optim): return optim.param_groups[0]['lr'] if hasattr(optim, 'param_groups') else optim.lr
 def get_lrs(optim, sched, epochs, steps=1, accs=None):
@@ -105,16 +77,5 @@ class TestLrScheduler(unittest.TestCase):
   def test_onecyclelr(self): self._test_onecyclelr(100, {'pct_start': 0.3, 'anneal_strategy': 'linear',
                                                          'cycle_momentum': False, 'div_factor': 25.0,
                                                          'final_div_factor': 10000.0, 'max_lr':1e-5}, 1e-6, 1e-6)
-  @unittest.skip("slow")
-  def test_training(self):
-    without = lr_scheduler_training()
-    sched_fns = [MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR]
-    argss = [{'milestones': [5, 7, 10, 15], 'gamma': 0.5}, {'factor': 0.5, 'patience': 2}, {'T_max': 25, 'eta_min': 0.001},
-             {'pct_start': 0.3, 'anneal_strategy': 'linear', 'cycle_momentum': False, 'div_factor': 25.0, 'final_div_factor': 10000.0,
-              'max_lr':1e-5, 'total_steps': 25}]
-    for sched_fn, args in zip(sched_fns, argss):
-      with_sched = lr_scheduler_training(sched_fn, args)
-      assert with_sched > without
-
 if __name__ == '__main__':
   unittest.main()

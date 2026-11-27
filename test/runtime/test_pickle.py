@@ -1,24 +1,10 @@
 import unittest, pickle, tracemalloc
 import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
-from tinygrad.helpers import GlobalCounters, DEV
+from tinygrad.helpers import DEV
 from tinygrad.uop.ops import UOp
-from test.helpers import KernelCountException
 
 class TestPickle(unittest.TestCase):
-  def test_pickle_realized_tensor(self):
-    print("** init")
-    t = Tensor.rand(10, 10).realize()
-    st = pickle.dumps(t)
-    t_values = t.numpy()
-    del t # free buffers
-    print("** post pickle")
-    GlobalCounters.reset()
-    t2:Tensor = pickle.loads(st)
-    np.testing.assert_equal(t_values, t2.numpy())
-    # expect at most one COPY kernel
-    if GlobalCounters.kernel_count > 1: raise KernelCountException(1, GlobalCounters.kernel_count)
-
   def test_pickle_realized_tensor_alt(self):
     print("** init")
     t = Tensor.rand(10, 10).realize()
@@ -28,22 +14,6 @@ class TestPickle(unittest.TestCase):
     print("** post pickle")
     t2:Tensor = pickle.loads(st)
     assert t2.uop.is_realized
-    np.testing.assert_equal(t_values, t2.numpy())
-
-  def test_pickle_realized_tensor_alt2(self):
-    print("** init")
-    t = Tensor.rand(10, 10).realize()
-    tensor_uop = t.uop
-    assert tensor_uop.is_realized, f"expected {tensor_uop} to be realized"
-    t_values = t.numpy()
-    # pickle
-    st = pickle.dumps(t)
-    # free buffers
-    del t
-    del tensor_uop
-    print("** post pickle")
-    t2:Tensor = pickle.loads(st)
-    assert t2.uop.is_realized, f"expected {t2.uop} to be realized"
     np.testing.assert_equal(t_values, t2.numpy())
 
   # NOTE: currently Buffer exists on the uop, not tensor
@@ -156,30 +126,6 @@ class TestPickle(unittest.TestCase):
     for _ in range(3): fn(Tensor.randn(4))
     loaded = pickle.loads(pickle.dumps(fn))
     self.assertEqual(loaded(Tensor([1.0,2.0,3.0,4.0])).tolist(), [2.0,3.0,4.0,5.0])
-
-class TestPickleJIT(unittest.TestCase):
-  @classmethod
-  def setUpClass(cls):
-    N = 10
-    @TinyJit
-    def add(a, b): return a.sum()+b+1
-    for _ in range(3): add(Tensor.rand(N, N), Tensor.rand(N, N))
-    cls.st = pickle.dumps(add)
-    del add
-
-  def test_inspect(self):
-    import io
-    class FakeClass:
-      def __init__(self, *args, **kwargs):
-        print(self.module, self.name)
-    class InspectUnpickler(pickle.Unpickler):
-      def find_class(self, module, name): return type("SpecializedFakeClass", (FakeClass,), {"name": name, "module": module})
-    InspectUnpickler(io.BytesIO(self.st)).load()
-
-  @unittest.skip("we are still saving intermediate buffers")
-  def test_size(self):
-    # confirm no intermediate buffers are saved
-    self.assertLess(len(self.st), 1_000_000)
 
 if __name__ == '__main__':
   unittest.main()

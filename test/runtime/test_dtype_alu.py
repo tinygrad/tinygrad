@@ -20,8 +20,6 @@ settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES",
 settings.load_profile("my_profile")
 
 dtypes_float = (dtypes.float16, dtypes.float32, dtypes.float64)
-dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
-dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
@@ -408,24 +406,6 @@ class TestDTypeALU(unittest.TestCase):
 
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
-
-  # Metal and (MOCK)CUDA and HIP and NIR behave differently than numpy for overflows
-  skip_overflow = ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"AMD", "NV", "CUDA"})
-                   or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer))
-  @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
-         strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
-         ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "TODO: fix cast inf to int32 in PYTHON")
-  @unittest.skip("broken on Mac")
-  def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
-
-  @unittest.skip("broken. TODO: fix it")
-  @given(ht.float32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
-  def test_float_cast(self, a, dtype): universal_test_cast(a, dtypes.float32, dtype)
-
-  @unittest.skip("broken. TODO: fix it")
-  @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
-  def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
   @given(strat.floats(width=32, min_value=1.0, max_value=254.0, allow_subnormal=False),
          strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))

@@ -6,7 +6,6 @@ from PIL import Image
 from tinygrad import Tensor, Context
 from tinygrad.helpers import getenv
 from extra.models.efficientnet import EfficientNet
-from extra.models.vit import ViT
 from extra.models.resnet import ResNet50
 
 def _load_labels():
@@ -60,25 +59,6 @@ class TestEfficientNet(unittest.TestCase):
     labels = _infer(self.model, np.concatenate([chicken_img, car_img], axis=0))
     self.assertEqual(_LABELS[labels[0]], "hen")
     self.assertEqual(_LABELS[labels[1]], "sports car, sport car")
-
-@unittest.skip("these pretrained models are no longer available")
-class TestViT(unittest.TestCase):
-  @classmethod
-  def setUpClass(cls):
-    cls.model = ViT()
-    cls.model.load_from_pretrained()
-
-  @classmethod
-  def tearDownClass(cls):
-    del cls.model
-
-  def test_chicken(self):
-    labels = _infer(self.model, chicken_img)
-    self.assertEqual(_LABELS[labels[0]], "cock")
-
-  def test_car(self):
-    labels = _infer(self.model, car_img)
-    self.assertEqual(_LABELS[labels[0]], "racer, race car, racing car")
 
 class TestResNet(unittest.TestCase):
   @classmethod

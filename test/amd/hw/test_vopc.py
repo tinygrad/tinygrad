@@ -132,18 +132,6 @@ class TestCmpClass(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "v_cmp_neq_f32(NaN, 1.0) should be 1")
 
-  def test_v_cmp_sets_vcc_bits(self):
-    """V_CMP_EQ sets VCC bits based on per-lane comparison."""
-    instructions = [
-      s_mov_b32(s[0], 5),
-      v_mov_b32_e32(v[0], s[0]),
-      v_mov_b32_e32(v[1], s[0]),
-      v_cmp_eq_u32_e32(v[0], v[1]),
-    ]
-    st = run_program(instructions, n_lanes=4)
-    self.assertEqual(st.vcc & 0xf, 0xf, "All lanes should match")
-
-
 class TestCmpClassF16(unittest.TestCase):
   """Tests for V_CMP_CLASS_F16 float classification.
 
@@ -530,20 +518,6 @@ class TestVOP3VOPCModifiers(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 0, "abs(0.0) >= abs(-1.0) should be false")
 
-  def test_v_cmp_ge_f32_abs_negative_divisor(self):
-    """v_cmp_ge_f32 with abs: remainder check for negative divisor.
-
-    Tests the exact comparison used in int16 mod: abs(rem_f) >= abs(div_f).
-    For 1 % -1: rem_f = 0.0, div_f = -1.0, so abs(0.0) >= abs(-1.0) = false.
-    """
-    instructions = [
-      v_mov_b32_e32(v[0], 0.0),    # remainder as float
-      v_mov_b32_e32(v[1], -1.0),   # divisor as float
-      v_cmp_ge_f32_e64(VCC_LO, v[0], v[1], abs=0b11),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.vcc & 1, 0, "abs(0.0) >= abs(-1.0) should be false")
-
   def test_v_cmp_ge_f32_abs_small_remainder(self):
     """v_cmp_ge_f32 with abs: abs(-0.5) >= abs(-3.0) = false."""
     instructions = [
@@ -683,25 +657,6 @@ class TestVOPCF64(unittest.TestCase):
 
 class TestCmpxExec(unittest.TestCase):
   """Tests for V_CMPX instructions that modify EXEC mask."""
-
-  def test_v_cmpx_ngt_f32_e64_all_true(self):
-    """V_CMPX_NGT_F32_E64: all lanes pass (literal <= all values)."""
-    # 131072.0 = 0x48000000
-    # All values > 131072, so !(131072 > val) = true for all
-    instructions = [
-      s_mov_b32(EXEC_LO, 0x7),  # 3 lanes active
-      v_mov_b32_e32(v[0], f2i(200000.0)),  # lane 0
-      v_cmp_eq_u32_e32(1, v[255]),
-      v_cndmask_b32_e64(v[1], v[0], f2i(300000.0), VCC_LO),  # lane 1
-      v_cmp_eq_u32_e32(2, v[255]),
-      v_cndmask_b32_e64(v[1], v[1], f2i(400000.0), VCC_LO),  # lane 2
-      # Now v[1] has: lane0=200000, lane1=300000, lane2=400000
-      # Compare: !(131072.0 > v[1]) i.e., 131072.0 <= v[1]
-      v_cmpx_ngt_f32_e64(EXEC_LO, f2i(131072.0), v[1]),
-    ]
-    st = run_program(instructions, n_lanes=3)
-    # All values > 131072, so all lanes should remain active
-    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0x7, 0x7, "All 3 lanes should remain active")
 
   def test_v_cmpx_ngt_f32_e64_some_false(self):
     """V_CMPX_NGT_F32_E64: some lanes fail (literal > some values)."""

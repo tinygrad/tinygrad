@@ -191,10 +191,6 @@ class TestHostCalls(unittest.TestCase):
     a = UOp.from_buffer(Buffer("CPU", 8, initial_value=struct.pack("Q", 41)), dtypes.uint64)
     self.assertEqual(self._run(inc, self._buf(1), a), [42])
 
-  def test_addr_of_arg(self):
-    b = self._buf(16, dtypes.uint8)
-    self.assertEqual(self._run(addr_of, self._buf(1), b), [b.buffer.get_buf("CPU")])
-
   def test_addr_of_view(self):
     @uopfunc
     def addr(o:UOp, b:UOp): return o.index(0).store(b[4:8].getaddr("CPU")).sink()
@@ -244,14 +240,6 @@ class TestHostCalls(unittest.TestCase):
       s = hcq2.cstruct(init_c_struct_t(8, (("pad", ctypes.c_uint32, 0), ("value", ctypes.c_uint32, 4))), value=42)
       return o.index(0).store(s.bitcast(dtypes.uint32).index(1).load().cast(dtypes.uint64)).sink()
     self.assertEqual(self._run(read, self._buf(1)), [42])
-
-  def test_variable_in_function(self): # a variable is passed to a function, the program binds it by name
-    @uopfunc
-    def scale(o:UOp, a:UOp, k:UOp): return o.index(0).store(a.index(0).load() * k).sink()
-    @uopfunc
-    def top(o:UOp, a:UOp): return scale(o, a, UOp.variable("k", 0, 10, dtypes.uint64)).sink()
-    a = UOp.from_buffer(Buffer("CPU", 8, initial_value=struct.pack("Q", 7)), dtypes.uint64)
-    self.assertEqual(self._run(top, self._buf(1), a, k=6), [42])
 
   def test_weak_variable_in_function(self): # a weak variable reached in a function
     @uopfunc

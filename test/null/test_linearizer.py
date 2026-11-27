@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
+from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, KernelInfo
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.codegen import to_program
@@ -8,8 +8,9 @@ from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.x86 import ISARenderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.helpers import Target
-from test.helpers import replace_opts
+from tinygrad.helpers import Target, Context
+from tinygrad.codegen.late.linearizer import do_split_ends
+from test.helpers import replace_opts, to_uops_list
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):
@@ -25,18 +26,6 @@ class TestLinearizer(unittest.TestCase):
     num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 1, "expected at least one load uop"
-
-  @unittest.skip("this is handled at higher level now")
-  def test_upcast_cse(self):
-    # when upcasting, within a subtree, there may be common expressions.
-
-    a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
-    r = a.expand([2]) + b.expand([2])
-
-    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
-                       renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
-    assert num_ops <= 1, "more alu uops than needed"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_reduce_upcast(self):
@@ -140,6 +129,59 @@ class TestLinearizerRenderers(unittest.TestCase):
     assert stores[1].src[1].max_numel() == 1
     assert stores[1].src[1].dtype == dtypes.float
     assert any(x.op is Ops.PARAM for x in stores[1].toposort())
+
+class TestLinearizerRewrite(unittest.TestCase):
+  def test_range_order(self):
+    types = [AxisType.DEVICE, AxisType.GLOBAL, AxisType.LOCAL, AxisType.WARP, AxisType.WEAK, AxisType.LOOP,
+             AxisType.UPCAST, AxisType.PLACEHOLDER]
+    # Axis type wins over numeric ids, including multi-part ids.
+    ranges = [UOp.range(4, 10-i, t).replace(arg=(t, 10-i, j)) for i,t in enumerate(types) for j in (0, 1)]
+    self.assertEqual(sorted(ranges[::-1], key=lambda r: r.arg), ranges)
+    self.assertEqual(ranges[0].axis_id, (10, 0))
+    self.assertEqual(ranges[0].axis_type, AxisType.DEVICE)
+    end = do_split_ends(UOp(Ops.NOOP).end(*ranges[::-1]))
+    for r in ranges:
+      self.assertIs(end.src[1], r)
+      end = end.src[0]
+    self.assertIs(end.op, Ops.NOOP)
+
+  def test_reduction(self):
+    t = Tensor.ones((64,64), device="NULL").contiguous().realize()
+    out = (t*2).sum(axis=1)
+    with Context(SPLIT_REDUCEOP=0):
+      si = out.schedule_linear().src[-1]
+      opts_to_apply = []
+      opts_to_apply.append(Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)))
+      opts_to_apply.append(Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST)))
+      ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+      prg = to_program(ast, Device.default.renderer)
+      print(prg.src[2].arg)
+      self.assertNotIn(Ops.REDUCE, [u.op for u in prg.src[1].src])
+      ranges = [u for u in prg.src[1].src if u.op is Ops.RANGE]
+      self.assertTrue(ranges)
+      self.assertTrue(all(r.axis_type is AxisType.WEAK for r in ranges))
+
+  def test_kernel_info(self):
+    out = Tensor.arange(4).clone("NULL")
+    si = out.schedule_linear().src[-1]
+
+    ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=()))
+    prg = to_program(ast, Device.default.renderer)
+    assert prg.src[0].arg.applied_opts == (), f"expected no opts, got {prg}"
+
+    prg = to_program(ast.replace(arg=KernelInfo(name="custom")), Device.default.renderer)
+    self.assertEqual(prg.src[0].arg.name, "custom")
+
+  def test_dependent_loop_bound(self):
+    buf, out, counts = UOp.param(0, dtypes.int, 16), UOp.param(1, dtypes.int, 4), UOp.param(2, dtypes.int, 4)
+    outer = UOp.range(4, 0)
+    inner = UOp.range(counts.index(outer).load().maximum(0).minimum(4), 1)
+    store = buf.index(outer * 4 + inner).store(UOp.const(1, dtypes.int)).end(inner)
+    uops = to_uops_list([out.after(store).index(outer).store(UOp.const(2, dtypes.int))])
+    self.assertEqual([u.op for u in uops if u.op in (Ops.RANGE, Ops.STORE, Ops.END)],
+                     [Ops.RANGE, Ops.RANGE, Ops.STORE, Ops.END, Ops.STORE, Ops.END])
+    rngs, ends = [u for u in uops if u.op is Ops.RANGE], [u for u in uops if u.op is Ops.END]
+    self.assertEqual([e.src[1] for e in ends], rngs[::-1])
 
 if __name__ == '__main__':
   unittest.main()

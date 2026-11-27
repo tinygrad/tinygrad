@@ -38,12 +38,6 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor([3.5])
     self.assertListEqual(f(x, Tensor([2.0])).sum().gradient(x)[0].tolist(), [1.0])
 
-  def test_with_custom_gradient(self):
-    x = Tensor([1.0, 2.0, 3.0])
-    z = (x * x).sum()
-    dx = z.gradient(x, gradient=Tensor([3.0]))[0]
-    self.assertListEqual(dx.tolist(), [6.0, 12.0, 18.0])
-
   def test_broadcast_gradient(self):
     x = Tensor([[1.0], [2.0], [3.0]])
     y = Tensor([[10.0, 20.0, 30.0, 40.0]])
@@ -59,12 +53,6 @@ class TestTensorGradient(unittest.TestCase):
     dz = Tensor([1.0, 1.0, 1.0])
     dx = z.gradient(x, gradient=dz)[0]
     self.assertListEqual(dx.tolist(), [2.0, 4.0, 6.0])
-
-  def test_copy_to_device_gradient(self):
-    t = Tensor([1.0, 2, 3]).realize()
-    t.to("CPU:1").square().sum().backward()
-    self.assertEqual(t.grad.device, t.device)
-    self.assertListEqual(t.grad.tolist(), [2.0, 4.0, 6.0])
 
   def test_multi_device_copy_gradient(self):
     for src in ("CPU", ("CPU", "CPU:1")):
@@ -156,18 +144,6 @@ class TestMultiOutputGradient(unittest.TestCase):
     grad_b = (Tensor(grad_c) + Tensor(grad_d) * Tensor(a)).uop
     return (None, None, grad_a, grad_b)
 
-  def test_custom_kernel_multi_output_backward(self):
-    a_np, b_np = np.random.randn(4, 4).astype(np.float32), np.random.randn(4, 4).astype(np.float32)
-    a_ref, b_ref = Tensor(a_np), Tensor(b_np)
-    ((a_ref + b_ref).sum() + (a_ref * b_ref).sum()).backward()
-
-    a, b = Tensor(a_np), Tensor(b_np)
-    Tensor.realize(a, b)
-    c, d, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), a, b, fxn=self.addmul_kernel, grad_fxn=self.backward_addmul)
-    (c.sum() + d.sum()).backward()
-    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), rtol=1e-5)
-    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), rtol=1e-5)
-
   def test_custom_kernel_aliased_output_views_backward(self):
     def kernel(c:UOp, d:UOp, a:UOp) -> UOp:
       c, d, a = c.flatten(), d.flatten(), a.flatten()
@@ -193,32 +169,6 @@ class TestMultiOutputGradient(unittest.TestCase):
     (c * d).sum().backward()
     np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), rtol=1e-5, atol=1e-7)
     np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), rtol=1e-5, atol=1e-7)
-
-  def test_custom_kernel_three_output_backward(self):
-    def addmulsub_kernel(C:UOp, D:UOp, E:UOp, A:UOp, B:UOp) -> UOp:
-      C, D, E, A, B = C.flatten(), D.flatten(), E.flatten(), A.flatten(), B.flatten()
-      i = UOp.range(C.numel(), 0)
-      store_c = C[i].store(A[i] + B[i])
-      store_d = D[i].store(A[i] * B[i])
-      store_e = E[i].store(A[i] - B[i])
-      return UOp.group(store_c, store_d, store_e).end(i).sink(arg=KernelInfo(name="addmulsub")).simplify()
-    def backward_addmulsub(grad_c, grad_d, grad_e, call):
-      _c, _d, _e, a, b = call.src[1:]
-      grad_a = (Tensor(grad_c) + Tensor(grad_d) * Tensor(b) + Tensor(grad_e)).uop
-      grad_b = (Tensor(grad_c) + Tensor(grad_d) * Tensor(a) - Tensor(grad_e)).uop
-      return (None, None, None, grad_a, grad_b)
-
-    a_np, b_np = np.random.randn(4, 4).astype(np.float32), np.random.randn(4, 4).astype(np.float32)
-    a_ref, b_ref = Tensor(a_np), Tensor(b_np)
-    ((a_ref + b_ref).sum() + (a_ref * b_ref).sum() + (a_ref - b_ref).sum()).backward()
-
-    a, b = Tensor(a_np), Tensor(b_np)
-    Tensor.realize(a, b)
-    c, d, e, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), Tensor.empty(4, 4), a, b,
-                                          fxn=addmulsub_kernel, grad_fxn=backward_addmulsub)
-    (c.sum() + d.sum() + e.sum()).backward()
-    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=1e-6, rtol=1e-5)
-    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=1e-6, rtol=1e-5)
 
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):

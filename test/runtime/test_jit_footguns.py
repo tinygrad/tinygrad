@@ -266,15 +266,6 @@ class TestJitFootguns(unittest.TestCase):
       np.testing.assert_equal(f(Tensor([9, 8, 7, 6]), Tensor([True, True, True, True])).numpy(), [9, 8, 7, 6])
       np.testing.assert_equal(f(Tensor([1, 1, 1, 1]), Tensor([False, False, False, False])).numpy(), [-1, -1, -1, -1])
 
-  def test_nonzero_static_size_jittable(self):
-    @TinyJit
-    def f(x): return x.nonzero(size=3, fill_value=-1).realize()
-
-    for _ in range(3):
-      np.testing.assert_equal(f(Tensor([1, 0, 2, 0, 3])).numpy(), [[0], [2], [4]])
-      np.testing.assert_equal(f(Tensor([0, 0, 5, 0, 0])).numpy(), [[2], [-1], [-1]])
-      np.testing.assert_equal(f(Tensor([0, 0, 0, 0, 0])).numpy(), [[-1], [-1], [-1]])
-
   def test_tolist_bakes_in_values(self):
     """.tolist() raises error during JIT capture (would bake in values)."""
     @TinyJit

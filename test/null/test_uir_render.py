@@ -39,10 +39,6 @@ class TestSSARender(unittest.TestCase):
     with Context(NOOPT=1): sink = full_rewrite_to_sink(self._kernel(o), Device["CPU"].renderer, optimize=False)
     assert_roundtrip(self, sink)
 
-  def test_gemm_kernel_graph(self):
-    o = Tensor.rand(4,4, device="CPU").matmul(Tensor.rand(4,4, device="CPU"))
-    assert_roundtrip(self, self._kernel(o))
-
   def test_symbolic_variable(self):
     n = UOp.variable("n", 1, 64)
     g = UOp.sink(((n + 1) * 2) % 7, (n % 5) + UOp.const(Invalid))

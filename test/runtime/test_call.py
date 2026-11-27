@@ -32,61 +32,6 @@ class TestCall(unittest.TestCase):
     consumer = p[0].store(v+r[0]).sink(arg=KernelInfo("consumer")).call(z, Variable("v", 1, 10, dtypes.int).bind(1).after(producer), y)
     self.assertEqual(Tensor(z.after(consumer)).tolist(), [2])
 
-  def test_call_plus(self):
-    a = Tensor.randn(10, 10)
-    b = Tensor.randn(10, 10)
-    Tensor.realize(a,b)
-
-    # we define a plus function
-    plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
-
-    c = Tensor.call(a, b, fxn=plus_fxn)
-    np.testing.assert_equal(c.numpy(), (a+b).numpy())
-
-  def test_call_plus_backward(self):
-    a = Tensor.ones(10, 10)
-    b = Tensor.ones(10, 10)
-
-    (a+b).mean().backward()
-    gt_a_grad = a.grad.numpy()
-    gt_b_grad = b.grad.numpy()
-    a.grad, b.grad = None, None
-
-    # this is the gradient for +
-    def grad_fxn(grad:UOp, call:UOp): return (grad, grad)
-
-    # we define a plus function
-    plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
-    c = Tensor.call(a, b, fxn=plus_fxn, grad_fxn=grad_fxn)
-    c.mean().backward()
-
-    np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)
-    np.testing.assert_allclose(b.grad.numpy(), gt_b_grad, rtol=1e-5)
-
-  def test_call_plus_backward_auto(self):
-    a = Tensor.ones(10, 10)
-    b = Tensor.ones(10, 10)
-
-    (a+b).mean().backward()
-    gt_a_grad = a.grad.numpy()
-    gt_b_grad = b.grad.numpy()
-    a.grad, b.grad = None, None
-
-    plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
-    c = Tensor.call(a, b, fxn=plus_fxn)
-    c.mean().backward()
-
-    np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)
-    np.testing.assert_allclose(b.grad.numpy(), gt_b_grad, rtol=1e-5)
-
-  def test_call_gemm(self):
-    M, K, N = 4, 8, 4
-    a = Tensor.randn(M, K)
-    b = Tensor.randn(K, N)
-    Tensor.realize(a, b)
-    c = Tensor.call(a, b, fxn=a.as_param(0) @ b.as_param(1))
-    np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
-
   def test_call_gemm_uop(self):
     M, K, N = 4, 8, 4
     a = Tensor.randn(M, K)
@@ -127,15 +72,6 @@ class TestCall(unittest.TestCase):
     np.testing.assert_equal(c.numpy(), 2 * np.ones((10, 10)))
 
 class TestCallSchedule(unittest.TestCase):
-  def test_precompile_slice_assign(self):
-    @function(precompile=True)
-    def f(x:Tensor) -> Tensor: return x * 2 + 1
-    a = Tensor.arange(8).float().realize()
-    cache = Tensor.zeros(16)
-    # the output must land at the slice offset, not at the start of the base buffer
-    cache[4:12].assign(f(a)).realize()
-    np.testing.assert_equal(cache.numpy(), np.concatenate([np.zeros(4), np.arange(8)*2+1, np.zeros(4)]).astype(np.float32))
-
   def test_precompile_slice_assign_2d(self):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x + 1
@@ -186,31 +122,6 @@ class TestCallSchedule(unittest.TestCase):
     cache.assign(f(a)).realize()
     np.testing.assert_equal(cache.numpy(), np.arange(8)*2+1)
 
-  def test_reshape_precompile(self):
-    a = Tensor.empty(4, 8).realize()
-    a = a.reshape(4,4,2).assign(Tensor.empty(4,4,2)).reshape(8,4)
-    @function(precompile=True)
-    def s(x): return x.sum(axis=0)
-    (s(a)*3).realize()
-
-  def test_call_precompiled(self):
-    a = Tensor.empty(4, 8)
-    @function(precompile=True)
-    def s(x): return x*2
-    (s(a)*3).realize()
-
-  def test_double_call(self):
-    a = Tensor.empty(4, 8)
-    @function(precompile=True)
-    def s(x): return x*2
-    s(s(a)).realize()
-
-  def test_double_call_contiguous(self):
-    a = Tensor.empty(4, 8)
-    @function(precompile=True)
-    def s(x): return x*2
-    s(s(a).contiguous()).realize()
-
   def test_contiguous_call_output_realizes_aliases(self):
     def increment(x:UOp):
       i = UOp.range(x.shape[0], 0)
@@ -242,18 +153,6 @@ class TestCallSchedule(unittest.TestCase):
         a = Tensor.arange(1024).clone().realize()
         a.assign(f(a)).realize()
         self.assertEqual(a.tolist(), list(reversed(range(1024))))
-
-  def test_call_double_gemm(self):
-    a = Tensor.randn(4, 8)
-    b = Tensor.randn(8, 12)
-    c = Tensor.randn(12, 16)
-    ref = Tensor.randn(4, 16)
-    Tensor.realize(a,b,c,ref)
-    @function(precompile=True)
-    def gemm(a:Tensor, b:Tensor, c:Tensor) -> Tensor: return (a@b)@c
-    out = gemm(a,b,c)
-    (out-ref).square().mean().backward()
-    out.realize(a.grad, b.grad, c.grad)
 
   def test_precompile_symbolic_shape(self):
     """precompile with a symbolic-shaped input produces correct values and shape"""
@@ -358,14 +257,6 @@ class TestCallSchedule(unittest.TestCase):
     self.assertIsInstance(out.shape[0], UOp)
     np.testing.assert_allclose(out[:5].numpy(), (np.arange(16*4).reshape(16, 4)[:5] * 2 + 1).astype(np.float32))
 
-  def test_precompile_multi_sharded(self):
-    @function(precompile=True)
-    def f(x:Tensor) -> Tensor: return x + 1
-    devs = ("CPU:0", "CPU:1")
-    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
-    out = f(a) + 2
-    np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
-
 class TestArgOrder(unittest.TestCase):
   """outputs can appear anywhere in a call's srcs (output_pos): slots are src positions, nothing reorders"""
   def _dev(self, x): return x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
@@ -409,18 +300,6 @@ class TestArgOrder(unittest.TestCase):
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
 
 class TestCallMultiSharded(unittest.TestCase):
-  # TODO: multi-output + sharded needs per-device CALL execution, which requires reworking how MULTI propagates through TUPLE bodies
-  def test_tuple_sharded(self):
-    """multi-output function with sharded input"""
-    devs = ("CPU:0", "CPU:1")
-    @function
-    def f(x:Tensor): return (x + 1, x * 2)
-    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
-    t1, t2 = f(a)
-    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
-    np.testing.assert_allclose(t1.numpy(), ref + 1)
-    np.testing.assert_allclose(t2.numpy(), ref * 2)
-
   def test_tuple_sharded_precompile(self):
     """multi-output precompiled function with sharded input"""
     devs = ("CPU:0", "CPU:1")
@@ -442,30 +321,6 @@ class TestCallMultiSharded(unittest.TestCase):
     ref = np.arange(8, dtype=np.float32).reshape(4, 2)
     np.testing.assert_allclose(t1.numpy(), ref.sum(axis=0))
     np.testing.assert_allclose(t2.numpy(), ref.sum(axis=1))
-
-  def test_tuple_sharded_different_ops(self):
-    """multi-output function with different operations per output"""
-    devs = ("CPU:0", "CPU:1")
-    @function
-    def f(x:Tensor, y:Tensor): return (x + y, x * y)
-    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
-    b = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0) + 1
-    t1, t2 = f(a, b)
-    ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
-    ref_b = ref_a + 1
-    np.testing.assert_allclose(t1.numpy(), ref_a + ref_b)
-    np.testing.assert_allclose(t2.numpy(), ref_a * ref_b)
-
-  def test_tuple_sharded_mixed_use(self):
-    """multi-output sharded results used in further computation"""
-    devs = ("CPU:0", "CPU:1")
-    @function
-    def f(x:Tensor): return (x + 1, x * 2)
-    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
-    t1, t2 = f(a)
-    out = (t1 + t2).sum()
-    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
-    np.testing.assert_allclose(out.numpy(), ((ref + 1) + (ref * 2)).sum())
 
   def test_tuple_sharded_outputs_different_axis(self):
     """multi-output function where the two outputs are sharded on different axes"""

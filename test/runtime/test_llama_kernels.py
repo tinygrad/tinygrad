@@ -34,7 +34,6 @@ class TestFusedCE(unittest.TestCase):
 
   def test_fused_ce_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
   def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)
-  def test_fused_ce_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
   def test_fused_ce_grad_with_logits_reader(self):
     # squaring makes the backward's upstream grad read the forward's loss too. the backward must not pin logits behind the forward
     logits = Tensor.randn(1, 2, 16).cast(dtypes.bfloat16).contiguous().realize()

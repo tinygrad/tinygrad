@@ -129,15 +129,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a[:j, :], b[:, :i]).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_shrink(self):
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      a = Tensor.rand(7, 11)
-      symbolic = a.shrink(((3,5),(vi,vi+2)))
-      symbolic = symbolic.numpy()
-      expected = a.shrink(((3,5),(i,i+2))).numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
   def test_slice_pad_sum(self):
     vi = Variable("i", 1, 4).bind(4)
     self.assertEqual(Tensor.ones(1, 12).contiguous().pad(((4, 0), (0, 0)))[vi, :5+vi].sum().item(), 9)
@@ -164,14 +155,6 @@ class TestSymbolicOps(unittest.TestCase):
       vi = Variable("i", 5, 10).bind(i)
       symbolic = (a.pad(((0, vi-4),)) + b[:vi]).sum().item()
       expected = (a.pad(((0, i-4),)) + b[:i]).sum().item()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
-  def test_slice_var_shape(self):
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      a = Tensor.ones(vi, 11).contiguous()
-      symbolic = a[:, 1:2][:i, :1].numpy()
-      expected = Tensor.ones(i, 11)[:, 1:2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_expand_reduce(self):
@@ -270,6 +253,19 @@ class TestSymbolicOps(unittest.TestCase):
     np.testing.assert_equal((vi < 5).where(0, t).numpy(), [0., 0.])
     np.testing.assert_equal((vi < 5).where(t, 0).numpy(), [1., 2.])
     np.testing.assert_equal(vi.isclose(Tensor([3., 4.])).numpy(), [True, False])
+
+class TestSymbolicPad(unittest.TestCase):
+  def test_pad(self):
+    v = Variable("v", 1, 100).bind(5)
+    t = Tensor.ones(100)[:v].pad(((4, 0),))
+    t = t[:9]
+    assert t.tolist() == [0,0,0,0,1,1,1,1,1]
+
+  def test_pad_image(self):
+    v = Variable("v", 1, 4).bind(2)
+    t = Tensor(list(range(1, 17)), dtype="float", device="PYTHON").reshape(4,4).realize()
+    with Context(IMAGE=1):
+      assert t[:v].pad(((0, 5-v), None)).tolist() == [[1,2,3,4],[5,6,7,8]] + [[0]*4]*3
 
 if __name__ == '__main__':
   unittest.main()

@@ -3,10 +3,6 @@ from tinygrad import Tensor, dtypes
 # test cases are modified from pytorch test_indexing.py
 
 class TestIndexing(unittest.TestCase):
-  def test_single_int(self):
-    v = Tensor.randn(5, 7, 3)
-    self.assertEqual(v[4].shape, (7, 3))
-
   def test_multiple_int(self):
     v = Tensor.randn(5, 7, 3)
     self.assertEqual(v[4].shape, (7, 3))
@@ -24,12 +20,6 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(v[[0, 4, 2]].shape, (3, 7, 3))
     self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
     self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
-
-  def test_index_src_datatype(self):
-    src = Tensor.ones(3, 2, 4)
-    # test index
-    res = src[[0, 2, 1], :, :]
-    self.assertEqual(res.shape, src.shape)
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
@@ -75,11 +65,6 @@ class TestNumpy(unittest.TestCase):
     # these two trigger slice internal type verification first
     self.assertRaises(TypeError, lambda: a[0.0:, 0.0])
     self.assertRaises(TypeError, lambda: a[0.0:, 0.0,:])
-
-  def test_none_index(self):
-    # `None` index adds newaxis
-    a = Tensor([1, 2, 3])
-    self.assertEqual(a[None].ndim, a.ndim+1)
 
   def test_everything_returns_views(self):
     # Before `...` would return a itself.

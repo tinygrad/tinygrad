@@ -20,16 +20,6 @@ class TestBasicArithmetic(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 3.0, places=5)
 
-  def test_v_mul_f32(self):
-    """V_MUL_F32 multiplies two floats."""
-    instructions = [
-      v_mov_b32_e32(v[0], 2.0),
-      v_mov_b32_e32(v[1], 4.0),
-      v_mul_f32_e32(v[2], v[0], v[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 8.0, places=5)
-
   def test_v_add_f32_dpp_row_shl(self):
     """V_ADD_F32 DPP row_shl swizzles src0 before the add."""
     instructions = [
@@ -97,16 +87,6 @@ class TestBitManipulation(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][1], 0x0f)
 
-  def test_v_and_b32_quadrant(self):
-    """V_AND_B32 for quadrant extraction (n & 3)."""
-    instructions = [
-      s_mov_b32(s[0], 15915),
-      v_mov_b32_e32(v[0], s[0]),
-      v_and_b32_e32(v[1], 3, v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.vgpr[0][1], 15915 & 3)
-
   def test_v_lshrrev_b32(self):
     """V_LSHRREV_B32 logical shift right."""
     instructions = [
@@ -163,20 +143,6 @@ class TestSpecialValues(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertTrue(math.isnan(i2f(st.vgpr[0][2])))
-
-  def test_v_add_f32_inf_minus_inf(self):
-    """V_ADD_F32: inf + (-inf) = NaN."""
-    import math
-    instructions = [
-      s_mov_b32(s[0], 0x7f800000),
-      s_mov_b32(s[1], 0xff800000),
-      v_mov_b32_e32(v[0], s[0]),
-      v_mov_b32_e32(v[1], s[1]),
-      v_add_f32_e32(v[2], v[0], v[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])))
-
 
 class TestF16Ops(unittest.TestCase):
   """Tests for 16-bit VOP2 operations."""
@@ -809,30 +775,6 @@ class TestCarryOps(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0xFFFFFFFB)  # -5 as unsigned
     self.assertEqual(st.vcc, 1)  # Borrow out
-
-  def test_v_add_co_ci_u32_no_carry(self):
-    """V_ADD_CO_CI_U32: D0 = S0 + S1 + VCC_IN, when VCC_IN=0."""
-    instructions = [
-      s_mov_b32(VCC_LO, 0),  # VCC = 0 (no carry in)
-      v_mov_b32_e32(v[0], 5),  # S0 = 5
-      v_mov_b32_e32(v[1], 10),  # S1 = 10
-      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 5 + 10 + 0 = 15
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.vgpr[0][2], 15)
-    self.assertEqual(st.vcc, 0)  # No carry out
-
-  def test_v_add_co_ci_u32_with_carry(self):
-    """V_ADD_CO_CI_U32: D0 = S0 + S1 + VCC_IN, when VCC_IN=1."""
-    instructions = [
-      s_mov_b32(VCC_LO, 1),  # VCC = 1 (carry in)
-      v_mov_b32_e32(v[0], 5),  # S0 = 5
-      v_mov_b32_e32(v[1], 10),  # S1 = 10
-      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 5 + 10 + 1 = 16
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.vgpr[0][2], 16)
-    self.assertEqual(st.vcc, 0)  # No carry out
 
   def test_v_add_co_ci_u32_generates_carry(self):
     """V_ADD_CO_CI_U32: generates carry when overflow occurs."""

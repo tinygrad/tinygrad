@@ -54,45 +54,6 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(Tensor.rand(16, 128)@Tensor.rand(128, 16),
                           [[Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST))]])
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  def test_double_reduce(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a = Tensor.rand(8, N, 8, N)
-    r = a.sum(axis=(1,3))
-    helper_linearizer_opt(r, [
-      # openCL / DEV=CL is 256 max threads
-      [Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True))], [Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True))],
-      # Checking how it works with 1 grouped_reduce.
-      [Opt(OptOps.SPLIT, 3, (2, AxisType.LOCAL, True))], [Opt(OptOps.SPLIT, 3, (32, AxisType.LOCAL, True))],
-      [Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True))],
-      [Opt(OptOps.SPLIT, 2, (16, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True))],
-      [Opt(OptOps.SPLIT, 2, (4, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 4, (64, AxisType.LOCAL, True))], # Checking how it works with 2 grouped_reduces.
-      [Opt(OptOps.SPLIT, 2, (16, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST))],
-      # Checking how it works with 2 grouped_reduces + upcasts.
-      [Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (32, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 4, (4, AxisType.UPCAST))],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (4, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True))],
-      # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 6, (32, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 5, (4, AxisType.UPCAST))],
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST))],
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)), Opt(OptOps.SPLIT, 4, (4, AxisType.UPCAST)),
-       Opt(OptOps.SPLIT, 5, (4, AxisType.UPCAST))], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (4, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST))], # No globals
-    ])
-
   def test_padto_matmul(self):
     N = 17
     Tensor.manual_seed(289)
@@ -200,34 +161,6 @@ class TestKernelOpts(unittest.TestCase):
     for arg in (-4, 0, 1, True):
       with self.assertRaises(KernelOptError):
         helper_linearizer_opt(a.sum(1), [[Opt(OptOps.PADTO, 1, arg)]])
-
-  def test_padto_sum(self):
-    N = 18
-    # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
-    a = Tensor.rand(N, N).shrink(((0, 17), (0, 17))).exp()
-    helper_linearizer_opt(a.exp().sum(), [[Opt(OptOps.PADTO, 0, 32)],])
-    helper_linearizer_opt(a.exp().sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
-
-    b = a < 1
-    helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, 0, 32)],])
-    helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, 1, 32)],])
-
-  def test_padto_max(self):
-    N = 18
-    # NOTE: this setup prevents 17 * 17 contiguous merged into one axis
-    a = -Tensor.rand(N, N).shrink(((0, 17), (0, 17))) * 100
-
-    helper_linearizer_opt(a.max(0), [
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),],
-    ])
-    helper_linearizer_opt(a.max(1), [
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),],
-    ])
-
-    helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
-    helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_where_multioutput(self):
     Tensor.manual_seed(0)

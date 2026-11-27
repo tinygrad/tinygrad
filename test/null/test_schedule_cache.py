@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Variable, Context
+from tinygrad import Tensor, Variable, Context, Device
 from tinygrad.helpers import cpu_events
 from tinygrad.codegen import schedule_cache
 
@@ -45,6 +45,24 @@ class TestScheduleCache(unittest.TestCase):
       with Context(SCACHE=1): schedule_one()
       num_events_cache = len(cpu_events)
     self.assertLess(num_events_cache, num_events_no_cache)
+
+class TestMethodCache(unittest.TestCase):
+  def setUp(self):
+    self.backup_compiler = Device[Device.DEFAULT].compiler.compile_cached
+  def tearDown(self):
+    Device[Device.DEFAULT].compiler.compile_cached = self.backup_compiler
+
+  def test_nested_methodcache(self):
+    a,b,c,d = Tensor([1]), Tensor([2]), Tensor([3]), Tensor([4])
+    ((a+b)+(a+b)).realize()
+    Device[Device.DEFAULT].compiler.compile_cached = None
+    ((c+d)+(c+d)).realize()
+
+  def test_nested_methodcache_swap(self):
+    a,b,c,d = Tensor([1]), Tensor([2]), Tensor([3]), Tensor([4])
+    ((a+b)+(c+d)).realize()
+    Device[Device.DEFAULT].compiler.compile_cached = None
+    ((c+d)+(a+b)).realize()
 
 if __name__ == "__main__":
   unittest.main()

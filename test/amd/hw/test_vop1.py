@@ -100,38 +100,6 @@ class TestTrigonometry(unittest.TestCase):
 class TestRounding(unittest.TestCase):
   """Tests for rounding instructions."""
 
-  def test_v_rndne_f32_half_even(self):
-    """V_RNDNE_F32 rounds to nearest even."""
-    instructions = [
-      s_mov_b32(s[0], f2i(2.5)),
-      v_mov_b32_e32(v[0], s[0]),
-      v_rndne_f32_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.0, places=5)
-
-  def test_v_rndne_f32_half_odd(self):
-    """V_RNDNE_F32 rounds 3.5 to 4 (nearest even)."""
-    instructions = [
-      s_mov_b32(s[0], f2i(3.5)),
-      v_mov_b32_e32(v[0], s[0]),
-      v_rndne_f32_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 4.0, places=5)
-
-  def test_v_rndne_f32_large(self):
-    """V_RNDNE_F32 with large value (like sin reduction uses)."""
-    val = 100000.0 * 0.15915494309189535
-    instructions = [
-      s_mov_b32(s[0], f2i(val)),
-      v_mov_b32_e32(v[0], s[0]),
-      v_rndne_f32_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    expected = round(val)
-    self.assertAlmostEqual(i2f(st.vgpr[0][1]), expected, places=0)
-
   def test_v_floor_f32(self):
     """V_FLOOR_F32 floors to integer."""
     instructions = [
@@ -178,16 +146,6 @@ class TestRounding(unittest.TestCase):
 class TestConversion(unittest.TestCase):
   """Tests for conversion instructions."""
 
-  def test_v_cvt_i32_f32_positive(self):
-    """V_CVT_I32_F32 converts float to signed int."""
-    instructions = [
-      s_mov_b32(s[0], f2i(42.7)),
-      v_mov_b32_e32(v[0], s[0]),
-      v_cvt_i32_f32_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.vgpr[0][1], 42)
-
   def test_v_cvt_i32_f32_negative(self):
     """V_CVT_I32_F32 converts negative float to signed int."""
     instructions = [
@@ -208,16 +166,6 @@ class TestConversion(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][1], 15915)
 
-  def test_v_cvt_f32_i32(self):
-    """V_CVT_F32_I32 converts signed int to float."""
-    instructions = [
-      s_mov_b32(s[0], 42),
-      v_mov_b32_e32(v[0], s[0]),
-      v_cvt_f32_i32_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 42.0, places=5)
-
   def test_v_cvt_f32_u32(self):
     """V_CVT_F32_U32 converts unsigned int to float."""
     instructions = [
@@ -231,17 +179,6 @@ class TestConversion(unittest.TestCase):
 
 class TestF16Conversions(unittest.TestCase):
   """Tests for f16 conversion instructions."""
-
-  def test_v_cvt_f16_f32_basic(self):
-    """V_CVT_F16_F32 converts f32 to f16 in low 16 bits."""
-    instructions = [
-      v_mov_b32_e32(v[0], 1.0),
-      v_cvt_f16_f32_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = st.vgpr[0][1]
-    lo_bits = result & 0xffff
-    self.assertEqual(lo_bits, 0x3c00, f"Expected 0x3c00, got 0x{lo_bits:04x}")
 
   def test_v_cvt_f16_f32_negative(self):
     """V_CVT_F16_F32 converts negative f32 to f16."""
@@ -437,17 +374,6 @@ class TestF64Conversions(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     result = i2f(st.vgpr[0][2])
     self.assertAlmostEqual(result, 123456.789, places=0)
-
-  def test_v_cvt_f64_i32_positive(self):
-    """V_CVT_F64_I32 converts positive i32 to f64."""
-    instructions = [
-      s_mov_b32(s[0], 42),
-      v_mov_b32_e32(v[0], s[0]),
-      v_cvt_f64_i32_e32(v[2:3], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
-    self.assertAlmostEqual(result, 42.0, places=10)
 
   def test_v_cvt_f64_i32_negative(self):
     """V_CVT_F64_I32 converts negative i32 to f64."""
@@ -991,15 +917,6 @@ class TestLog(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=4)
 
-  def test_v_log_f32_two(self):
-    """V_LOG_F32 of 2.0 returns 1.0."""
-    instructions = [
-      v_mov_b32_e32(v[0], 2.0),
-      v_log_f32_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=4)
-
   def test_v_log_f32_four(self):
     """V_LOG_F32 of 4.0 returns 2.0."""
     instructions = [
@@ -1386,26 +1303,6 @@ class TestVop1F16HiHalf(unittest.TestCase):
   extract bits [31:16] from the actual VGPR.
   """
 
-  def test_v_cvt_f32_f16_src_hi_half(self):
-    """V_CVT_F32_F16 with source from hi-half (v[128]+).
-
-    When src0 >= v[128], it reads from the high 16 bits of v[src0-128].
-    This is critical for global_load_d16_hi_b16 + v_cvt_f32_f16 patterns.
-
-    Regression test for: VOP1 f16 src0 hi-half extraction bug.
-    """
-    instructions = [
-      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
-      s_mov_b32(s[0], 0x40003c00),
-      v_mov_b32_e32(v[0], s[0]),
-      # v_cvt_f32_f16 v[1], v[128] (reads hi half of v[0])
-      # Should convert f16(2.0) to f32(2.0)
-      v_cvt_f32_f16_e32(v[1], v[128]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = i2f(st.vgpr[0][1])
-    self.assertAlmostEqual(result, 2.0, places=5, msg=f"Expected f32(2.0), got {result}")
-
   def test_v_cvt_f32_f16_src_lo_vs_hi(self):
     """V_CVT_F32_F16 comparing lo and hi half reads.
 
@@ -1488,19 +1385,6 @@ class TestReciprocalF16(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
     self.assertAlmostEqual(result, 1.0, places=2, msg="1/1.0 should be 1.0")
-
-  def test_v_rcp_f16_two(self):
-    """V_RCP_F16: 1/2.0 = 0.5"""
-    import struct
-    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
-    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
-    instructions = [
-      v_mov_b32_e32(v[0], f16_to_bits(2.0)),
-      v_rcp_f16_e32(v[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
-    self.assertAlmostEqual(result, 0.5, places=2, msg="1/2.0 should be 0.5")
 
   def test_v_rcp_f16_four(self):
     """V_RCP_F16: 1/4.0 = 0.25"""

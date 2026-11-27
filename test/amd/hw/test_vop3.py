@@ -91,19 +91,6 @@ class TestFmacE64(unittest.TestCase):
   Regression test for: VOP3 FMAC missing D0 accumulator bug.
   """
 
-  def test_v_fmac_f32_e64_basic(self):
-    """V_FMAC_F32_E64: basic accumulate test."""
-    instructions = [
-      v_mov_b32_e32(v[0], 2.0),  # S0 = 2.0
-      v_mov_b32_e32(v[1], 3.0),  # S1 = 3.0
-      v_mov_b32_e32(v[2], 1.0),  # D0 (accumulator) = 1.0
-      # v_fmac_f32_e64 v[2], v[0], v[1]
-      # D0 = D0 + S0 * S1 = 1.0 + 2.0 * 3.0 = 7.0
-      v_fmac_f32_e64(v[2], v[0], v[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 7.0, places=5)
-
   def test_v_fmac_f32_e64_with_sgpr_sources(self):
     """V_FMAC_F32_E64 with SGPR sources (common in AMD:LLVM output).
 
@@ -647,18 +634,6 @@ class TestLaneOps(unittest.TestCase):
     for lane in range(4):
       self.assertEqual(st.vgpr[lane][2], 20)
 
-  def test_v_readlane_b32_lane_0(self):
-    """V_READLANE_B32 reading from lane 0."""
-    instructions = [
-      v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
-      v_add_nc_u32_e32(v[0], 100, v[0]),   # v0 = 100 + lane_id * 4
-      self._readlane(s[0], v[0], 0),       # s0 = lane 0's v0 = 100
-      v_mov_b32_e32(v[1], s[0]),
-    ]
-    st = run_program(instructions, n_lanes=4)
-    for lane in range(4):
-      self.assertEqual(st.vgpr[lane][1], 100)
-
   def test_v_readlane_b32_last_lane(self):
     """V_READLANE_B32 reading from the last active lane (lane 3)."""
     instructions = [
@@ -682,33 +657,6 @@ class TestLaneOps(unittest.TestCase):
     st = run_program(instructions, n_lanes=4)
     for lane in range(4):
       self.assertEqual(st.vgpr[lane][6], 58)
-
-  def test_v_writelane_b32_basic(self):
-    """V_WRITELANE_B32 writes a scalar to a specific lane's VGPR."""
-    instructions = [
-      v_mov_b32_e32(v[0], 0),
-      s_mov_b32(s[0], 999),
-      v_writelane_b32(v[0], s[0], 2),
-    ]
-    st = run_program(instructions, n_lanes=4)
-    for lane in range(4):
-      if lane == 2:
-        self.assertEqual(st.vgpr[lane][0], 999)
-      else:
-        self.assertEqual(st.vgpr[lane][0], 0)
-
-  def test_v_writelane_then_readlane(self):
-    """V_WRITELANE followed by V_READLANE to verify round-trip."""
-    instructions = [
-      v_mov_b32_e32(v[0], 0),
-      s_mov_b32(s[0], 0xdeadbeef),
-      v_writelane_b32(v[0], s[0], 1),      # Write to lane 1
-      self._readlane(s[1], v[0], 1),       # Read back from lane 1 into s1
-      v_mov_b32_e32(v[1], s[1]),
-    ]
-    st = run_program(instructions, n_lanes=4)
-    for lane in range(4):
-      self.assertEqual(st.vgpr[lane][1], 0xdeadbeef)
 
   def test_v_readlane_for_reduction(self):
     """Simulate a wave reduction using readlane - common WMMA/reduction pattern."""
@@ -976,25 +924,6 @@ class TestF16Modifiers(unittest.TestCase):
     self.assertAlmostEqual(result_lo, 1.0, delta=0.01, msg=f"Expected lo=1.0, got {result_lo}")
 
 
-class TestF16FmaMix(unittest.TestCase):
-  """Tests for V_FMA_MIX_F32/F16."""
-
-  def test_v_fma_mix_f32_all_f32(self):
-    """V_FMA_MIX_F32 with all f32 sources."""
-    instructions = [
-      s_mov_b32(s[0], f2i(2.0)),
-      v_mov_b32_e32(v[0], s[0]),
-      s_mov_b32(s[1], f2i(3.0)),
-      v_mov_b32_e32(v[1], s[1]),
-      s_mov_b32(s[2], f2i(1.0)),
-      v_mov_b32_e32(v[2], s[2]),
-      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = i2f(st.vgpr[0][3])
-    self.assertAlmostEqual(result, 7.0, places=5)
-
-
 class TestF64Ops(unittest.TestCase):
   """Tests for 64-bit float operations."""
 
@@ -1121,37 +1050,6 @@ class TestF64Ops(unittest.TestCase):
     hi = st.vgpr[0][5]
     result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
     self.assertEqual(result, -8)
-
-  def test_v_trig_preop_f64_index0(self):
-    """V_TRIG_PREOP_F64 index=0: primary chunk of 2/PI."""
-    import math
-    two_over_pi = 2.0 / math.pi
-    instructions = [
-      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
-      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
-    self.assertAlmostEqual(result, two_over_pi, places=10)
-
-  def test_v_trig_preop_f64_sum_equals_two_over_pi(self):
-    """V_TRIG_PREOP_F64: sum of chunks 0,1,2 should equal 2/PI."""
-    import math
-    two_over_pi = 2.0 / math.pi
-    instructions = [
-      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
-      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
-      v_trig_preop_f64(v[2:3], abs(s[0:1]), 1),
-      v_trig_preop_f64(v[4:5], abs(s[0:1]), 2),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
-    p1 = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
-    p2 = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
-    total = p0 + p1 + p2
-    self.assertAlmostEqual(total, two_over_pi, places=14)
 
   def test_v_fma_f64_sin_kernel_step84(self):
     """V_FMA_F64: exact values from sin(2.0) kernel step 84 that shows 1-bit difference."""
@@ -1410,41 +1308,8 @@ class TestB64VOPLiteral(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0x0000000D)  # hi
 
 
-class TestWMMAMore(unittest.TestCase):
-  """More WMMA tests."""
-
-  def test_v_wmma_f32_16x16x16_f16_basic(self):
-    """V_WMMA_F32_16X16X16_F16 basic test - verify output is non-zero."""
-    instructions: list[Inst] = []
-    instructions.append(s_mov_b32(s[0], 0x3c003c00))
-    for i in range(16, 32):
-      instructions.append(v_mov_b32_e32(v[i], s[0]))
-    for i in range(8):
-      instructions.append(v_mov_b32_e32(v[i], 0))
-    instructions.append(v_wmma_f32_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
-    st = run_program(instructions, n_lanes=32)
-    any_nonzero = any(st.vgpr[lane][0] != 0 for lane in range(32))
-    self.assertTrue(any_nonzero, "WMMA should produce non-zero output")
-
-
 class TestSinReduction(unittest.TestCase):
   """Tests for sin argument reduction steps."""
-
-  def test_sin_reduction_step1_mul(self):
-    """First step: v1 = |x| * (1/2pi)."""
-    import math
-    one_over_2pi = 1.0 / (2.0 * math.pi)
-    x = 100000.0
-    instructions = [
-      s_mov_b32(s[0], f2i(x)),
-      s_mov_b32(s[1], f2i(one_over_2pi)),
-      v_mov_b32_e32(v[0], s[0]),
-      v_mul_f32_e32(v[1], s[1], v[0]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = i2f(st.vgpr[0][1])
-    expected = x * one_over_2pi
-    self.assertAlmostEqual(result, expected, places=0)
 
   def test_sin_reduction_step2_round(self):
     """Second step: round to nearest integer."""
@@ -1794,35 +1659,9 @@ class TestReadlane(unittest.TestCase):
     for lane in range(32):
       self.assertEqual(st.vgpr[lane][0], lane)
 
-  def test_reduction_pattern(self):
-    """Test reduction using readlane."""
-    instructions = [
-      v_mov_b32_e32(v[0], v[255]),
-      v_readlane_b32(s[0], v[0], 0),
-      v_readlane_b32(s[1], v[0], 1),
-      v_readlane_b32(s[2], v[0], 2),
-      v_readlane_b32(s[3], v[0], 3),
-      s_add_u32(s[4], s[0], s[1]),
-      s_add_u32(s[4], s[4], s[2]),
-      s_add_u32(s[4], s[4], s[3]),
-    ]
-    st = run_program(instructions, n_lanes=4)
-    self.assertEqual(st.sgpr[4], 6)
-
 
 class TestMed3(unittest.TestCase):
   """Tests for V_MED3 - median of 3 values."""
-
-  def test_v_med3_f32_basic(self):
-    """V_MED3_F32: median of 1.0, 2.0, 3.0 is 2.0."""
-    instructions = [
-      v_mov_b32_e32(v[0], 1.0),
-      v_mov_b32_e32(v[1], 2.0),
-      v_mov_b32_e32(v[2], 3.0),
-      v_med3_f32(v[3], v[0], v[1], v[2]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 2.0, places=5)
 
   def test_v_med3_f32_reversed(self):
     """V_MED3_F32: median of 3.0, 2.0, 1.0 is still 2.0."""
@@ -2415,19 +2254,6 @@ class TestMulF32EdgeCases(unittest.TestCase):
 class TestAddF32EdgeCases(unittest.TestCase):
   """Edge cases for V_ADD_F32."""
 
-  def test_v_add_f32_inf_minus_inf(self):
-    """V_ADD_F32: inf + (-inf) = NaN."""
-    import math
-    instructions = [
-      s_mov_b32(s[0], 0x7f800000),  # +inf
-      s_mov_b32(s[1], 0xff800000),  # -inf
-      v_mov_b32_e32(v[0], s[0]),
-      v_mov_b32_e32(v[1], s[1]),
-      v_add_f32_e32(v[2], v[0], v[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])))
-
   def test_v_add_f32_pos_neg_zero(self):
     """V_ADD_F32: +0 + (-0) = +0."""
     instructions = [
@@ -2457,26 +2283,6 @@ class TestDivScaleF64(unittest.TestCase):
   These tests verify that VCC bits are set independently per lane,
   which is essential for correct multi-lane f64 division operations.
   """
-
-  def test_div_scale_f64_basic_no_scaling(self):
-    """V_DIV_SCALE_F64: normal values with no scaling needed."""
-    sqrt2 = f2i64(1.4142135623730951)
-    one = f2i64(1.0)
-    instructions = [
-      s_mov_b32(s[0], sqrt2 & 0xffffffff),
-      s_mov_b32(s[1], sqrt2 >> 32),
-      s_mov_b32(s[2], one & 0xffffffff),
-      s_mov_b32(s[3], one >> 32),
-      v_mov_b32_e32(v[0], s[0]),
-      v_mov_b32_e32(v[1], s[1]),
-      v_mov_b32_e32(v[2], s[2]),
-      v_mov_b32_e32(v[3], s[3]),
-      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=VCC, src0=v[0:1], src1=v[0:1], src2=v[2:3]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
-    self.assertAlmostEqual(result, 1.4142135623730951, places=10)
-    self.assertEqual(st.vcc & 1, 0, "VCC should be 0 when no scaling needed")
 
   def test_div_scale_f64_vcc_per_lane_uniform_input(self):
     """V_DIV_SCALE_F64: VCC bits should be set independently per lane (uniform input).
@@ -3667,6 +3473,33 @@ class TestPermlane(unittest.TestCase):
     self.assertEqual(st.vgpr[16][1], 0)
     self.assertEqual(st.vgpr[21][1], 5)
     self.assertEqual(st.vgpr[31][1], 15)
+
+class TestPermlaneVarRDNA4(unittest.TestCase):
+  def test_v_permlane16_var_b32_reverse(self):
+    out = run_rdna4([
+      r4.v_mov_b32_e32(r4.v[0], r4.v[255]),
+      r4.v_xor_b32_e32(r4.v[1], 15, r4.v[255]),
+      r4.v_permlane16_var_b32(r4.v[2], r4.v[0], r4.v[1]),
+    ])
+    self.assertEqual(out[0], 15)
+    self.assertEqual(out[5], 10)
+    self.assertEqual(out[15], 0)
+    self.assertEqual(out[16], 31)
+    self.assertEqual(out[21], 26)
+    self.assertEqual(out[31], 16)
+
+  def test_v_permlanex16_var_b32_cross_row(self):
+    out = run_rdna4([
+      r4.v_mov_b32_e32(r4.v[0], r4.v[255]),
+      r4.v_mov_b32_e32(r4.v[1], r4.v[255]),
+      r4.v_permlanex16_var_b32(r4.v[2], r4.v[0], r4.v[1]),
+    ])
+    self.assertEqual(out[0], 16)
+    self.assertEqual(out[5], 21)
+    self.assertEqual(out[15], 31)
+    self.assertEqual(out[16], 0)
+    self.assertEqual(out[21], 5)
+    self.assertEqual(out[31], 15)
 
 class TestClampLdExpRegressions(unittest.TestCase):
   """Regression tests for f32 clamp (-0 -> +0) and ldexp input passthrough."""

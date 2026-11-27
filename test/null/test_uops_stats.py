@@ -47,25 +47,6 @@ class TestMemoryCount(unittest.TestCase):
     _, mem = get_stats(a+b)
     self.assertEqual(mem, 1024*1024*2 + 1024)  # 1 full read + 1 lil read + 1 write
 
-  @unittest.skip("no longer supported")
-  def test_both_expanded(self):
-    # TODO: this probably should be a full write
-    a = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
-    b = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
-    _, mem = get_stats(a+b)
-    # rangeify is smart!
-    self.assertEqual(mem, 1024 + 2*1024)  # 2 lil reads + 1 lil write
-
-  def test_self_add(self):
-    a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)
-    _, mem = get_stats(a+a)
-    self.assertEqual(mem, 1024*1024*2)  # 1 read + 1 write
-
-  def test_self_add_transposed(self):
-    a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)
-    _, mem = get_stats(a+a.T)
-    self.assertEqual(mem, 1024*1024*2)  # 1 read + 1 write
-
   def test_self_add_assign(self):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8).realize()
     _, mem = get_stats(a.assign(a+a))

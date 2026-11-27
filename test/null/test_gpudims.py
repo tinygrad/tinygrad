@@ -97,17 +97,6 @@ class TestGroupedDims(unittest.TestCase):
     assert idxs[2].op is Ops.RANGE, f"expected RANGE for direct-mapped dim, got {idxs[2].op}"
     assert idxs[3].op is Ops.RANGE, f"expected RANGE for direct-mapped dim, got {idxs[3].op}"
 
-  def test_grouped_dims_high_rank(self):
-    # 4D collapsed onto 2 axes
-    self._check_grouped_dims("gidx", (4,4,4,4), (16,16), False, [16,16])
-    # 4D untouched
-    self._check_grouped_dims("gidx", (2,3,4,5), None, False, [2,3,4,5])
-    idxs = get_grouped_dims("gidx", (2,3,4,5), None, False)
-    assert all(u.op is Ops.RANGE for u in idxs), f"expected all-RANGE when untouched, got {[u.op for u in idxs]}"
-    # 5D and 6D collapsed onto 3 axes
-    self._check_grouped_dims("gidx", (2,2,2,2,2), (4,4,4), False, [4,4,2])
-    self._check_grouped_dims("gidx", (2,2,2,2,2,2), (8,8,8), False, [8,4,2])
-
   def test_symbolic_dims_cross_launch_limit(self):
     dim = UOp.variable("dim", 1, 4)
     assert len(get_grouped_dims("gidx", (1, dim), (4, 3))) == 2

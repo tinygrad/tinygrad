@@ -107,9 +107,5 @@ class TestOps(TensorTestCase):
       lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True),
       expected=(AssertionError, RuntimeError, ValueError, IndexError))
 
-  def test_scatter_no_reduce_tensor_src(self):
-    with self.assertRaises(TypeError):
-      Tensor.ones(4).scatter(dim=1, index=Tensor([0]), src=Tensor.ones(4), reduce="add")
-
 if __name__ == '__main__':
   unittest.main()

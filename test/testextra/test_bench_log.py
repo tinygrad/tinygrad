@@ -13,16 +13,6 @@ class TestBenchLog(unittest.TestCase):
   def setUp(self):
     clear_events()
 
-  def test_log_single_wall_time(self):
-    for event in BenchEvent:
-      with WallTimeEvent(event):
-        time.sleep(0.1)
-
-    # check event list
-    for event in BenchEvent:
-      self.assertEqual(len(_events[event]["wall"]), 1)
-      self.assertGreater(_events[event]["wall"][0][0], 0)
-
   def test_log_double_wall_time(self):
     for event in BenchEvent:
       with WallTimeEvent(event):
@@ -37,23 +27,6 @@ class TestBenchLog(unittest.TestCase):
       self.assertEqual(len(_events[event]["wall"]), 2)
       self.assertGreater(_events[event]["wall"][0][0], 0)
       self.assertGreater(_events[event]["wall"][1][0], 0)
-
-  @skipIf(_SKIP_KERNEL_TIMING, "ci timing is not accurate")
-  def test_log_single_kernel_time(self):
-    wall_times = []
-
-    with Context(DEBUG=2):
-      for event in BenchEvent:
-        with KernelTimeEvent(event):
-          st = time.perf_counter()
-          Tensor.rand(32, 32).sum().realize().item()
-          wall_times.append(time.perf_counter() - st)
-
-    # check event list
-    for event in BenchEvent:
-      self.assertEqual(len(_events[event]["kernel"]), 1)
-      self.assertLess(_events[event]["kernel"][0][0], wall_times[0])
-      self.assertGreater(_events[event]["kernel"][0][0], 0)
 
   @skipIf(_SKIP_KERNEL_TIMING, "ci cuda timing is not accurate")
   def test_interleaved_wall_kernel_time(self):

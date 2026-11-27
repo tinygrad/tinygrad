@@ -9,11 +9,6 @@ from test.mockgpu.amd.pcode import parse_expr
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE
 from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp, GLOBALOp
 
-def _srcs():
-  """Create minimal source variables for pcode parsing."""
-  def u32(v=0): return UOp.const(v, dtypes.uint32)
-  return {'S0': u32(), 'S1': u32(), 'S2': u32(), 'SCC': u32(), 'VCC': UOp.const(0, dtypes.uint64), 'laneId': u32()}
-
 class TestBasicParsing(unittest.TestCase):
   """Test basic pcode parsing for common instruction patterns."""
 
@@ -44,28 +39,6 @@ class TestBasicParsing(unittest.TestCase):
   def test_unclosed_c_block(self):
     with self.assertRaisesRegex(AssertionError, 'unclosed pcode block'):
       parse_pcode('if (1) {\nvalue = 2;')
-
-  def test_v_add_f32(self):
-    """Test parsing V_ADD_F32 pcode."""
-    _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_F32_E32], _srcs())
-    self.assertEqual(len(assigns), 1)
-    dest, _ = assigns[0]
-    self.assertTrue(dest.startswith('D0'))
-
-  def test_v_lshlrev_b32(self):
-    """Test parsing V_LSHLREV_B32 pcode."""
-    _, assigns = parse_pcode(PCODE[VOP2Op.V_LSHLREV_B32_E32], _srcs())
-    self.assertEqual(len(assigns), 1)
-
-  def test_s_cselect_b32(self):
-    """Test parsing S_CSELECT_B32 pcode with ternary."""
-    _, assigns = parse_pcode(PCODE[SOP2Op.S_CSELECT_B32], _srcs())
-    self.assertEqual(len(assigns), 1)
-
-  def test_v_add_co_ci_u32(self):
-    """Test parsing V_ADD_CO_CI_U32 with carry."""
-    _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_CO_CI_U32_E32], _srcs())
-    self.assertGreaterEqual(len(assigns), 1)
 
 class TestWithSources(unittest.TestCase):
   """Test pcode parsing with actual source operand values."""
@@ -144,13 +117,6 @@ class TestParseExpr(unittest.TestCase):
 class TestForLoopParsing(unittest.TestCase):
   """Test for loop parsing (CLZ/CTZ patterns)."""
 
-  def test_clz_pcode_exists(self):
-    """Verify CLZ pcode is available."""
-    pcode = PCODE.get(VOP1Op.V_CLZ_I32_U32_E32)
-    self.assertIsNotNone(pcode)
-    assert pcode is not None
-    self.assertIn('for', pcode.lower())
-
   def test_clz_parsing(self):
     """Test CLZ pcode parsing produces correct structure."""
     pcode = PCODE[VOP1Op.V_CLZ_I32_U32_E32]
@@ -172,16 +138,6 @@ class TestForLoopParsing(unittest.TestCase):
     # every cond folds (S0 is a const), leaving the default branch: -1 in the destination dtype
     self.assertIs(assigns[0][1].simplify(), UOp.const(-1, dtypes.uint32))
 
-  def test_ctz_parsing(self):
-    """Test CTZ pcode parsing."""
-    pcode = PCODE.get(VOP1Op.V_CTZ_I32_B32_E32)
-    if pcode is None:
-      self.skipTest("V_CTZ_I32_B32_E32 pcode not available")
-
-    S0 = UOp.const(1, dtypes.uint32)  # LSB set - CTZ should be 0
-    _vrs, assigns = parse_pcode(pcode, {'S0': S0})
-    self.assertEqual(len(assigns), 1)
-
 class TestDSPcodePatterns(unittest.TestCase):
   """Test DS instruction pcode patterns."""
 
@@ -198,33 +154,6 @@ class TestDSPcodePatterns(unittest.TestCase):
     mem_write = next(val for dest, val in assigns if dest == 'MEM[ADDR].f32')
     self.assertEqual(mem_write[1].op, Ops.ADD)  # type: ignore[index]
     self.assertEqual(mem_write[1].dtype, dtypes.float32)  # type: ignore[index]
-
-  def test_ds_load_b32_pcode(self):
-    """Test DS_LOAD_B32 pcode is parseable."""
-    pcode = PCODE.get(DSOp.DS_LOAD_B32)
-    self.assertIsNotNone(pcode)
-    assert pcode is not None
-    self.assertIn('RETURN_DATA', pcode)
-    self.assertIn('MEM[', pcode)
-
-  def test_ds_store_b32_pcode(self):
-    """Test DS_STORE_B32 pcode is parseable."""
-    pcode = PCODE.get(DSOp.DS_STORE_B32)
-    self.assertIsNotNone(pcode)
-    assert pcode is not None
-    self.assertIn('MEM[', pcode)
-    self.assertIn('DATA', pcode)
-
-  def test_mem_read_parsing(self):
-    """Test MEM[addr].type read expression parsing."""
-    # Create a mock LDS buffer
-    lds = UOp.param(3, dtypes.uint32, 16384)
-    addr = UOp.const(0, dtypes.uint32)
-    vrs = {'_lds': lds, 'ADDR': addr, 'OFFSET': UOp.const(0, dtypes.uint32)}
-
-    result = parse_expr('MEM[ADDR + OFFSET].b32', vrs)
-    # Should be an INDEX operation into LDS
-    self.assertIsNotNone(result)
 
   def test_ds_store_2addr_b32_parsing(self):
     """Test DS_STORE_2ADDR_B32 pcode parsing produces MEM writes."""

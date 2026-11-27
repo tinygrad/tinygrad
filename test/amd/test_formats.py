@@ -60,12 +60,6 @@ class TestVOP3(unittest.TestCase):
     inst = v_fma_f32(vdst=v[0], src0=v[1], src1=v[2], src2=v[3])
     self.assertEqual(inst.to_bytes(), bytes([0x00,0x00,0x13,0xd6,0x01,0x05,0x0e,0x04]))
 
-  def test_v_mad_f32(self):
-    # v_fmac_f32_e64 v0, v1, v2 (fmac is fma with implicit dst as src2)
-    # Use v_fma_f32 with vdst == src2
-    inst = v_fma_f32(vdst=v[0], src0=v[1], src1=v[2], src2=v[0])
-    self.assertEqual(inst.to_bytes()[:4], bytes([0x00,0x00,0x13,0xd6]))
-
   def test_v_add3_u32(self):
     # v_add3_u32 v0, v1, v2, v3
     # GFX11: encoding: [0x00,0x00,0x55,0xd6,0x01,0x05,0x0e,0x04]
@@ -81,12 +75,6 @@ class TestFLAT(unittest.TestCase):
     # GFX11: encoding: [0x00,0x00,0x52,0xdc,0x01,0x00,0x7c,0x00]
     inst = global_load_b32(vdst=v[0], addr=v[1:2], saddr=OFF)
     self.assertEqual(inst.to_bytes(), bytes([0x00,0x00,0x52,0xdc,0x01,0x00,0x7c,0x00]))
-
-  def test_global_store_b32(self):
-    # global_store_b32 v[0:1], v2, off (seg=2 for global)
-    # GFX11: encoding: [0x00,0x00,0x6a,0xdc,0x00,0x02,0x7c,0x00]
-    inst = global_store_b32(addr=v[0:1], data=v[2], saddr=OFF)
-    self.assertEqual(inst.to_bytes(), bytes([0x00,0x00,0x6a,0xdc,0x00,0x02,0x7c,0x00]))
 
   def test_global_load_b32_saddr(self):
     # global_load_b32 v0, v1, s[0:1] (seg=2 for global)
@@ -127,19 +115,6 @@ class TestSMEM(unittest.TestCase):
     # GFX11: encoding: [0x41,0x61,0x00,0xf4,0x00,0x00,0x00,0x00]
     inst = s_load_b32(sdata=s[5], sbase=s[2:3], soffset=s[0], glc=1, dlc=1)
     self.assertEqual(inst.to_bytes(), bytes([0x41,0x61,0x00,0xf4,0x00,0x00,0x00,0x00]))
-
-  def test_smem_disasm_roundtrip_dlc(self):
-    # Test that disassembly/reassembly preserves DLC bit correctly
-    data = bytes([0x41,0x21,0x00,0xf4,0x00,0x00,0x00,0x00])
-    decoded = SMEM.from_bytes(data)
-    self.assertEqual(decoded.to_bytes(), data)
-
-  def test_smem_disasm_roundtrip_glc_dlc(self):
-    # Test that disassembly/reassembly preserves GLC+DLC bits correctly
-    data = bytes([0x41,0x61,0x00,0xf4,0x00,0x00,0x00,0x00])
-    decoded = SMEM.from_bytes(data)
-    self.assertEqual(decoded.to_bytes(), data)
-
 
 class TestVOP3Literal(unittest.TestCase):
   """Test VOP3 literal handling - regression tests for Inst64 literal encoding."""

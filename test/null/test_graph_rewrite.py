@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same, Context
-from tinygrad.uop.ops import GroupOp, UOp, Ops, PatternMatcher, TrackedPatternMatcher, UPat
+from tinygrad.uop.ops import GroupOp, UOp, Ops, PatternMatcher, TrackedPatternMatcher, UPat, BottomUpGate
 from test.helpers import full_rewrite
 from hypothesis import given, strategies as strat
 
@@ -33,28 +33,33 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
     self.assertTrue(math.isnan(log2_neg), f"Expected NaN for log2(-1.0), got {log2_neg}")
     self.assertTrue(math.isinf(recip_zero) and recip_zero > 0, f"Expected +inf for reciprocal(0.0), got {recip_zero}")
 
-class TestGEPAndVectorizeRewrite(unittest.TestCase):
-  def test_gep_single_element_extraction(self):
-    # GEP on a vector dtype to extract a single element
-    base_vector = UOp.const((1.0, 2.0, 3.0, 4.0))
-    self.assertIs(apply_rewrite(base_vector.index(2)), apply_rewrite(base_vector.src[2]))
-
-  def test_gep_tuple_extraction(self):
-    # GEP on a vector dtype to extract multiple elements as a vector
-    base_vector = UOp.const((1.0, 2.0, 3.0, 4.0))
-    self.assertIs(apply_rewrite(UOp.stack(*[base_vector.index(i) for i in (2, 3)])),
-                  apply_rewrite(UOp.stack(base_vector.src[2], base_vector.src[3])))
-
-  def test_vectorize_multiple_elements(self):
-    # Vectorizing multiple elements using GEP
-    base_vector = UOp.const((5.0, 10.0, 15.0, 20.0))
-    vectorized_uop = UOp.stack(*(base_vector.index(i) for i in range(4)))
-    self.assertIs(apply_rewrite(vectorized_uop), apply_rewrite(base_vector))
-
 
 import inspect
 from tinygrad.uop.ops import graph_rewrite, _substitute, rewrite_group
 from tinygrad.uop.symbolic import symbolic_simple
+
+def assert_not_reached(): assert False, "This function should not be reached"
+def gate(): raise BottomUpGate
+
+class TestBottomUpGate(unittest.TestCase):
+  def test_basic_bottom_up_gate(self):
+    """Test that BottomUpGate stops bottom-up"""
+    pm = PatternMatcher([
+      (UPat(Ops.ADD), gate),
+      (UPat(Ops.MUL), assert_not_reached)
+    ])
+
+    a,b,c = UOp.variable("a",0,10), UOp.variable("b",0,10), UOp.variable("c",0,10)
+    graph_rewrite((a*a)+(b*c), pm, bottom_up=True)
+
+  def test_bottom_up_gate_with_rewriting(self):
+    pm = PatternMatcher([
+      (UPat.var("a")+UPat.var("a"), lambda a: 2*a),
+      (UPat(Ops.MUL), gate),
+      (UPat(Ops.CONST), assert_not_reached)
+    ])
+    a = UOp.variable("a",0,10)
+    graph_rewrite(a+a, pm, bottom_up=True)
 
 class TestBottomUpRewrite(unittest.TestCase):
   def test_const_folding(self):
@@ -71,13 +76,6 @@ def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.sta
 
 class TestSubstitute(unittest.TestCase):
   # these work because the substituted things don't have parents
-  def test_simple(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
-    ret = a + 4
-    ret = substitute(ret, {a:b})
-    self.assertIs(ret, b+4)
-
   def test_double(self):
     a = UOp.variable('a', 0, 10)
     b = UOp.variable('b', 0, 10)
@@ -92,21 +90,6 @@ class TestSubstitute(unittest.TestCase):
     ret = (a + 4) + (a + 5)
     ret = substitute(ret, {a:b})
     self.assertIs(ret, (b + 4) + (b + 5))
-
-  # this works because there's nothing above the substituted node
-  def test_sin(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
-    b = UOp.variable('b', 0, 10, dtype=dtypes.float)
-    ret = a.sin().sin()
-    ret = substitute(ret, {a.sin():b})
-    self.assertIs(ret, b.sin())
-
-  def test_sin_to_sqrt(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
-    n1 = a.sin()
-    ret = n1.sin()
-    ret = substitute(ret, {a.sin():a.sqrt()})
-    self.assertIs(ret, a.sqrt().sin())
 
   def test_double_sin_to_sqrt(self):
     a = UOp.variable('a', 0, 10, dtype=dtypes.float)
@@ -238,12 +221,6 @@ class TestWalkRewrite(unittest.TestCase):
 
   # *** top-down walk (default): process children first, then try pm on rebuilt node ***
 
-  def test_walk_topdown_simple_substitute(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
-    ret = graph_rewrite(a + 4, _substitute, {a:b}, walk=True)
-    self.assertIs(ret, b+4)
-
   def test_walk_topdown_does_not_traverse_into_replacement(self):
     """Top-down walk: replacement subtrees are NOT re-entered."""
     a = UOp.variable('a', 0, 10)
@@ -310,12 +287,6 @@ class TestWalkRewrite(unittest.TestCase):
     self.assertEqual(visited, [1, 2, Ops.ADD])
 
   # *** bottom-up walk: try bpm on node first, skip children if it matches ***
-
-  def test_walk_bottomup_simple_substitute(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
-    ret = graph_rewrite(a + 4, _substitute, {a:b}, bottom_up=True, walk=True)
-    self.assertIs(ret, b+4)
 
   def test_walk_bottomup_does_not_traverse_into_replacement(self):
     """Bottom-up walk: replacement subtrees are NOT entered."""

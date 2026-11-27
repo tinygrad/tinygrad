@@ -1,4 +1,4 @@
-import unittest, math, struct, operator, subprocess
+import unittest, math, struct, operator
 from tinygrad import Tensor, Device
 from tinygrad.dtype import DTYPES_DICT, dtypes, Invalid, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 from tinygrad.helpers import getenv, Context
@@ -452,23 +452,6 @@ class TestUnitTypeSpec(unittest.TestCase):
       assert dtypes.default_int is dtypes.int16
     assert dtypes.default_float is default_float
     assert dtypes.default_int is default_int
-
-  @unittest.skip("this test is slow and spawning whole pythons")
-  def test_env_set_default_float(self):
-    # check default
-    subprocess.run(['python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.float"'],
-                    shell=True, check=True)
-    # check change
-    subprocess.run(['DEFAULT_FLOAT=HALF python3 -c "from tinygrad import dtypes; assert dtypes.default_float == dtypes.half"'],
-                    shell=True, check=True)
-    # check invalid
-    with self.assertRaises(subprocess.CalledProcessError):
-      subprocess.run(['DEFAULT_FLOAT=INT32 python3 -c "from tinygrad import dtypes"'],
-                      shell=True, check=True)
-
-    with self.assertRaises(subprocess.CalledProcessError):
-      subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
-                      shell=True, check=True)
 
 if __name__ == '__main__':
   unittest.main()

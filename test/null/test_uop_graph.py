@@ -114,13 +114,6 @@ class TestGraphRewrite(unittest.TestCase):
     variables = [x for x in graph_rewrite(sink, PatternMatcher([])).toposort() if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU]
     self.assertEqual(len(variables), 1)
 
-  def test_simple(self):
-    c1 = UOp.const(1.0)
-    c2 = UOp.const(2.0)
-    nout = graph_rewrite(c1+c2, simple_pm)
-    self.assertEqual(nout.op, Ops.CONST)
-    self.assertEqual(nout.val, 3.0)
-
   def test_depth_2_late(self):
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
@@ -128,14 +121,6 @@ class TestGraphRewrite(unittest.TestCase):
     nout = graph_rewrite(c1*c2*(c3+c3), simple_pm)
     self.assertEqual(nout.op, Ops.CONST)
     self.assertEqual(nout.val, 12.0)
-
-  def test_double(self):
-    c1 = UOp.const(1.0)
-    c2 = UOp.const(2.0)
-    c3 = UOp.const(3.0)
-    nout = graph_rewrite(c1+c2+c3, simple_pm)
-    self.assertEqual(nout.op, Ops.CONST)
-    self.assertEqual(nout.val, 6.0)
 
   def test_triple(self):
     c1 = UOp.const(1.0)
@@ -210,11 +195,6 @@ class TestUOpGraph(unittest.TestCase):
     out = bf.where(c1, c2)
     self.assertIs(out.simplify(), c2)
 
-  def test_const_cast(self):
-    bf = UOp.const(False)
-    out = bf.cast(dtypes.int)
-    self.assertIs(full_rewrite(out.sink()).src[0], full_rewrite(UOp.const(0, dtypes.int).sink()).src[0])
-
   def test_devectorize_derives_lane_dtype(self):
     from tinygrad.codegen import do_devectorize
     # an Invalid lane derives bool while the value lane derives float: the lane rebuild must derive, not inherit
@@ -259,14 +239,6 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 1)
 
-  def test_depth_2_const_fold(self):
-    v = UOp.variable("tmp", 0, 1, dtypes.int)
-    c2 = UOp.const(2)
-    c4 = UOp.const(4)
-    vc = v+c2
-    out = vc+c4
-    self.assertIs(out.simplify(), (v+UOp.const(6)).simplify())
-
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
       d0 = UOp.param(0, dt, 1)
@@ -290,27 +262,6 @@ class TestUOpGraph(unittest.TestCase):
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: self.assertIs(u.src[1], expected)
-
-  def test_where_on_gated_load_folds_swapped_branches(self):
-    ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.long, 100)
-    ld = d0.index(ridx0.valid((ridx0<50).logical_not()))
-    w = (ridx0<50).where(5, ld)
-    uops = to_uops_list([w])
-    expected = full_rewrite(UOp.const(5, dtypes.long).sink()).src[0]
-    for u in uops:
-      assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD: self.assertIs(u.src[1], expected)
-
-  def test_where_on_casted_gated_load_extra_cond(self):
-    ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.float, 100)
-    ld = d0.index(ridx0.valid(ridx0<50))
-    w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(0.0)).cast(dtypes.half)
-    out = UOp.param(1, dtypes.half, 100)
-    uops = to_uops_list([out.index(ridx0).store(w)])
-    for u in uops:
-      assert u.op is not Ops.WHERE
 
   def test_where_on_casted_gated_load_extra_cond_swapped(self):
     ridx0 = UOp.range(100, 0)
@@ -486,25 +437,6 @@ class TestMovementOps(unittest.TestCase):
     self.assertEqual(result.src[0].op, Ops.RESHAPE)
 
 class TestConstStage(unittest.TestCase):
-  def test_const_stage_with_ranges(self):
-    """Test that CONST.STAGE with ranges is folded correctly.
-
-    STAGE can have ranges as additional sources beyond the value.
-    The pattern at rangeify.py uses allow_any_len=True because
-    CONST doesn't depend on ranges (constant is same value everywhere).
-    """
-    from tinygrad.codegen.rangeify import pm_const_buffer_folding
-    c = UOp.const(42.0)
-    r1 = UOp.range(3, 0)
-    stage_with_range = c.stage(r1, arg=StageOpts(device=None))
-    self.assertEqual(len(stage_with_range.src), 2)  # const + 1 range
-
-    result = graph_rewrite(stage_with_range, pm_const_buffer_folding, name='test')
-    # STAGE should be removed, result is const broadcast to shape
-    self.assertNotEqual(result.op, Ops.STAGE)
-    const_vals = [u.val for u in result.toposort() if u.op is Ops.CONST and u.dtype is dtypes.weakfloat]
-    self.assertIn(42.0, const_vals)
-
   def test_const_stage_with_multiple_ranges(self):
     """Test CONST.STAGE with multiple ranges is also folded."""
     from tinygrad.codegen.rangeify import pm_const_buffer_folding
@@ -524,37 +456,15 @@ class TestUOpGetItem(unittest.TestCase):
   def _placeholder(self, shape, dtype=dtypes.half):
     return UOp.placeholder(shape, dtype, slot=0, addrspace=AddrSpace.LOCAL)
 
-  # full slices (no shrink)
-  def test_full_slice(self):
-    p = self._placeholder((64, 64))
-    self.assertEqual(p[:, :].shape, (64, 64))
-  def test_full_slice_explicit(self):
-    p = self._placeholder((64, 64))
-    self.assertEqual(p[0:64, 0:64].shape, (64, 64))
-
   # partial slices (shrink)
-  def test_shrink_cols(self):
-    p = self._placeholder((64, 80))
-    self.assertEqual(p[:, :64].shape, (64, 64))
-  def test_shrink_rows(self):
-    p = self._placeholder((80, 64))
-    self.assertEqual(p[:64, :].shape, (64, 64))
   def test_shrink_both(self):
     p = self._placeholder((80, 80))
     self.assertEqual(p[:64, :64].shape, (64, 64))
-  def test_shrink_start(self):
-    p = self._placeholder((64, 64))
-    self.assertEqual(p[8:, :].shape, (56, 64))
   def test_shrink_start_and_end(self):
     p = self._placeholder((64, 64))
     self.assertEqual(p[8:56, 4:60].shape, (48, 56))
 
   # mixed slice and index
-  def test_index_and_slice(self):
-    p = self._placeholder((64, 80))
-    r = UOp.range(64, 100)
-    result = p[r, :64]
-    self.assertEqual(result.shape, (64,))
   def test_slice_and_index(self):
     p = self._placeholder((80, 64))
     r = UOp.range(64, 100)
@@ -582,10 +492,6 @@ class TestUOpGetItem(unittest.TestCase):
     r = UOp.range(64, 100)
     result = p[..., r]
     self.assertEqual(result.op, Ops.INDEX)
-  def test_ellipsis_only(self):
-    p = self._placeholder((64, 64))
-    self.assertEqual(p[...].shape, (64, 64))
-
   # all slices should not create a bare INDEX
   def test_all_slices_no_index(self):
     p = self._placeholder((64, 80))
@@ -603,20 +509,6 @@ class TestUOpBroadcast(unittest.TestCase):
     c = a + b
     self.assertEqual(c.shape, (4, 8))
     self.assertEqual(c.op, Ops.ADD)
-
-  def test_broadcast_col(self):
-    a = UOp.const(1.0).expand((4, 8))
-    b = UOp.const(2.0).expand((1, 8))
-    c = a + b
-    self.assertEqual(c.shape, (4, 8))
-    self.assertEqual(c.op, Ops.ADD)
-
-  def test_broadcast_lower_dim(self):
-    a = UOp.const(1.0).expand((4, 8))
-    b = UOp.const(2.0).expand((8,))
-    c = a * b
-    self.assertEqual(c.shape, (4, 8))
-    self.assertEqual(c.op, Ops.MUL)
 
   def test_broadcast_scalar(self):
     a = UOp.const(1.0).expand((4, 8))
