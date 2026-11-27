@@ -1849,7 +1849,7 @@ pm_remove_native = PatternMatcher([
 PC_INSTS = ("S_GETPC", "S_SETPC")
 
 @rewrite_group(replay="emu_process_replay")
-def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
+def lift(code:bytes, arch:str, dispatch:tuple, name:str="") -> UOp:
   insts = amd_decode(code, arch)
   assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
@@ -1941,6 +1941,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
         # complete the block for every participating wave before entering its successors, including barrier successors.
         end = emit_block(pc, end, scopes)
     return end
+
   ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name))
   ret = graph_rewrite(ret, pm_remove_native, name="remove native", enter_calls=True)
   return ret
