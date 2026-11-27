@@ -2,7 +2,8 @@ import unittest
 from tinygrad.helpers import Timing, getenv, unwrap, wait_cond
 from tinygrad import Tensor, Device, TinyJit, dtypes
 from tinygrad.device import Buffer
-from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import link_linear, run_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.uop.ops import UOp
 from tinygrad.runtime.ops_amd import AMDSDMAQueue
 from tinygrad.runtime.support.hcq2 import make_submit

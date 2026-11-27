@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variab
 from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import lower_and_compile, pm_beam
+from tinygrad.codegen.compile import lower_and_compile, pm_beam
 from test.helpers import needs_devices, slow, check_schedule, assert_kernel_count, KernelCountException, run_schedule
 from hypothesis import given, strategies as strat, settings
 

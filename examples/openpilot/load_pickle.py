@@ -2,7 +2,7 @@ import argparse, time
 from contextlib import nullcontext
 import numpy as np
 from tinygrad import Device
-from tinygrad.engine.realize import lower_and_compile
+from tinygrad.codegen.compile import lower_and_compile
 from extra.bench_log import WallTimeEvent, BenchEvent
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters

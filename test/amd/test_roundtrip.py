@@ -58,7 +58,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.uop.ops import Ops
-  from tinygrad.engine.realize import lower_and_compile, get_call_arg_uops
+  from tinygrad.codegen.compile import lower_and_compile, get_call_arg_uops
   from test.helpers import bound_schedule
   from tinygrad.runtime.support.elf import elf_loader
 

@@ -2,7 +2,7 @@ import gc
 from tinygrad import Tensor, UOp, Device, nn
 from tinygrad.codegen import schedule_cache
 from tinygrad.codegen import to_program, to_program_cache
-from tinygrad.engine.realize import compile_cache
+from tinygrad.codegen.compile import compile_cache
 from tinygrad.codegen.indexing import apply_movement_op, _apply_reshape
 from tinygrad.uop.divandmod import fold_divmod_general
 from test.test_tiny import TestTiny

@@ -48,7 +48,7 @@ class TestExport(unittest.TestCase):
     self.assertNotIn(e, call.body.toposort())
 
   def test_symbolic_program_shared_across_bindings(self):
-    from tinygrad.engine.realize import lower_and_compile
+    from tinygrad.codegen.compile import lower_and_compile
     def compile_slice(name, value):
       linear, externs = (buf()[:Variable(name, 1, 8).bind(value)] + 1).linear_with_externs()
       call, = linear.src

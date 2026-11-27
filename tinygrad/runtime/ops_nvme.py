@@ -4,7 +4,7 @@ from typing import cast
 from tinygrad.device import Allocator, Buffer, BufferSpec, BufferStorage, Compiled, Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import ceildiv, round_up, to_tuple, flatten, wait_cond
-from tinygrad.engine.realize import get_call_arg_uops
+from tinygrad.codegen.compile import get_call_arg_uops
 from tinygrad.runtime.autogen import nvme, pci
 from tinygrad.runtime.support.hcq2 import to_name, ins, unwrap_view, copy_submit
 from tinygrad.runtime.support.memory import AddrSpace, MemoryManager, MMIOInterface

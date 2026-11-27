@@ -2,7 +2,8 @@ import unittest
 
 from tinygrad import Tensor, Device, Variable, dtypes
 from tinygrad.helpers import fetch, round_up
-from tinygrad.engine.realize import compile_linear, link_linear
+from tinygrad.engine.realize import link_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.uop.ops import Ops
 from extra.hevc.hevc import parse_hevc_file_headers, nv_gpu
 from extra.hevc.decode import hevc_decode

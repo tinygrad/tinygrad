@@ -5,7 +5,7 @@ from tinygrad.device import host_of
 from tinygrad.helpers import HCQ_RUNTIME_DEV
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.codegen import create_linear
-from tinygrad.engine.realize import compile_linear
+from tinygrad.codegen.compile import compile_linear
 
 @Context(ALLOW_DEVICE_USAGE=0)
 def compile_uir(src:str, dev:str, host:str) -> str:

@@ -11,7 +11,8 @@ from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
-from tinygrad.engine.realize import run_linear, capturing, compile_linear, link_linear
+from tinygrad.engine.realize import run_linear, capturing, link_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.device import Buffer, Device, HCQ_RUNTIME_DEV, host_of
 
 # **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what it's linked to

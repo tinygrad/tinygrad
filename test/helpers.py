@@ -13,7 +13,8 @@ from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters, VAL
 from tinygrad.renderer import Renderer, TinyELF
 from tinygrad.codegen import full_rewrite_to_sink, linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
-from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import link_linear, run_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.engine.jit import bind_export
 
 # decorator to skip slow tests by default, run with RUN_SLOW=1 to include them

@@ -163,7 +163,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
 
   def test_invalids_into_custom_kernel_no_empty_kernel(self):
-    from tinygrad.engine.realize import compile_linear
+    from tinygrad.codegen.compile import compile_linear
     a = Tensor.full((4, 4), 3.).contiguous()
     b = Tensor.full((4, 4), 2.).contiguous()
     Tensor.realize(a, b)

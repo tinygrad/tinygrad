@@ -5,7 +5,8 @@ from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, uopfunc, KernelInfo
-from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear, compile_cache
+from tinygrad.engine.realize import link_linear, run_linear
+from tinygrad.codegen.compile import compile_linear, lower_and_compile, compile_cache
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.runtime.autogen import libc
