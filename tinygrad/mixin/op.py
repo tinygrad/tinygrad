@@ -8,7 +8,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element, to_max_shape
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype, commit_int
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
-from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
+from tinygrad.helpers import canonicalize_device, resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
@@ -108,7 +108,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         inferred = dtypes.from_py(flat)
         if not dtypes.is_int(inferred): raise IndexError(f"{index=} contains non-int element")
         index_uop = UOp._frompy([i+size if i<0 else i for i in flat], inferred)
-        if index_uop.device != self.device and self.device is not None: index_uop = index_uop.copy_to_device(self.device)
+        if index_uop.device != (device:=canonicalize_device(self.device)): index_uop = index_uop.copy_to_device(device)
         index = self._wrap_uop(index_uop).reshape(get_shape(index))
       elif is_adv(index):
         if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
