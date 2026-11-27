@@ -1,4 +1,4 @@
-import unittest, itertools, dis
+import unittest, dis
 from tinygrad.helpers import DEBUG
 from tinygrad.uop.upat import _get_code, upat_compile
 from tinygrad.dtype import dtypes
@@ -236,16 +236,6 @@ class TestPatternMatcher(unittest.TestCase):
     ])
     self.assertIsNotNone(matcher.rewrite(u1))
     self.assertIsNotNone(matcher.rewrite(u2))
-
-  def _assert_eq_upat(self, a:UPat, b:UPat):
-    assert (sorted(map(str,a.op)) if a.op else [] == (sorted(map(str,b.op)) if b.op else []))
-    assert (sorted(a.match_dtype) if a.match_dtype else [] == (sorted(b.match_dtype) if b.match_dtype else []))
-    assert (a.name, type(a.src)) == (b.name, type(b.src))
-    def simple_src(u:UPat):
-      if u.src is None: return []
-      if isinstance(u.src, itertools.repeat): return next(u.src[0])
-      return u.src[0]
-    for a,b in zip(simple_src(a), simple_src(b)): self._assert_eq_upat(a, b)
 
 @rewrite_group()
 def do_compile(up):

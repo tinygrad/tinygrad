@@ -5,22 +5,16 @@
 import unittest
 import numpy as np
 
-from tinygrad import nn, dtypes, Device, Tensor, Variable
+from tinygrad import dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import Ops, UPat, UOp
 from tinygrad.helpers import DEV, GlobalCounters, Context, temp
 from test.helpers import check_schedule, assert_kernel_count, run_schedule
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
-def _realize_weights(m):
-  for p in nn.state.get_parameters(m): p.realize()
-
 class TestSchedule(unittest.TestCase):
   def setUp(self):
-    self.ctx = Context(SPLIT_REDUCEOP=0)
-    self.ctx.__enter__()
-  def tearDown(self):
-    self.ctx.__exit__(None, None, None)
+    self.enterContext(Context(SPLIT_REDUCEOP=0))
 
   def test_example_matmul_same(self):
     x = Tensor.eye(64).clone().realize()

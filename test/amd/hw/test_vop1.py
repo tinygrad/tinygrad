@@ -1374,29 +1374,23 @@ class TestReciprocalF16(unittest.TestCase):
 
   def test_v_rcp_f16_one(self):
     """V_RCP_F16: 1/1.0 = 1.0"""
-    import struct
-    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
-    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
     instructions = [
       # Load f16 1.0 into low 16 bits of v[0]
-      v_mov_b32_e32(v[0], f16_to_bits(1.0)),
+      v_mov_b32_e32(v[0], f32_to_f16(1.0)),
       v_rcp_f16_e32(v[1], v[0]),
     ]
     st = run_program(instructions, n_lanes=1)
-    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    result = f16(st.vgpr[0][1] & 0xFFFF)
     self.assertAlmostEqual(result, 1.0, places=2, msg="1/1.0 should be 1.0")
 
   def test_v_rcp_f16_four(self):
     """V_RCP_F16: 1/4.0 = 0.25"""
-    import struct
-    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
-    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
     instructions = [
-      v_mov_b32_e32(v[0], f16_to_bits(4.0)),
+      v_mov_b32_e32(v[0], f32_to_f16(4.0)),
       v_rcp_f16_e32(v[1], v[0]),
     ]
     st = run_program(instructions, n_lanes=1)
-    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    result = f16(st.vgpr[0][1] & 0xFFFF)
     self.assertAlmostEqual(result, 0.25, places=2, msg="1/4.0 should be 0.25")
 
 

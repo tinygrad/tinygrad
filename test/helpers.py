@@ -1,4 +1,4 @@
-import sys, gc, time, struct, unittest, contextlib
+import sys, gc, struct, unittest, contextlib
 from dataclasses import replace
 from typing import Any, Callable, Iterator
 import numpy as np
@@ -9,7 +9,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, truncate, AddrSpace
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters, VALIDATE_WITH_CPU
+from tinygrad.helpers import Target, DEV, DEBUG, Context, GlobalCounters, VALIDATE_WITH_CPU
 from tinygrad.renderer import Renderer, TinyELF
 from tinygrad.codegen import full_rewrite_to_sink, linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
@@ -141,11 +141,6 @@ def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   if dt == dtypes.bfloat16 or dt in dtypes.fp8s: ret = np.array([truncate[dt](x) for x in ret], dtype=ret.dtype)
   if not allow_subnormal: ret = np.where(np.abs(ret) < min_normal(dt), 0, ret)
   return ret
-
-def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
-  st = time.perf_counter_ns()
-  ret = fxn(*args, **kwargs)
-  return ret, (time.perf_counter_ns()-st)*1e-6
 
 def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple[int, ...]=()):
   dev = Device['PYTHON']

@@ -1,15 +1,11 @@
 import unittest, sys
 from tinygrad import Tensor, GlobalCounters, dtypes, Context
-from tinygrad.helpers import WINO
 from test.helpers import check_schedule
 
 @unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinograd(unittest.TestCase):
   def setUp(self):
-    self.old = WINO.value
-    WINO.value = 1
-  def tearDown(self):
-    WINO.value = self.old
+    self.enterContext(Context(WINO=1))
 
   def test_forward_kernels(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()

@@ -56,16 +56,13 @@ class TestFusedQKVRoPE(unittest.TestCase):
   def setUp(self):
     if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("test uses bf16 inputs")
 
-  def rand_bf16(self, *shape:int) -> Tensor:
-    return (Tensor.randn(*shape) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
-
   def test_forward(self):
     Tensor.manual_seed(0)
     B, N, H, H_KV, D = 1, 32, 8, 2, 16
     GROUP = H // H_KV
     freqs_cis = (Tensor.randn(1, N * 2, 1, D // 2, 2) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
 
-    x = self.rand_bf16(B, N, H_KV * (GROUP + 2) * D)
+    x = (Tensor.randn(B, N, H_KV * (GROUP + 2) * D) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
     q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
     Tensor.realize(q, k, v)
     packed_ref = x.reshape(B, N, H_KV, GROUP + 2, D)

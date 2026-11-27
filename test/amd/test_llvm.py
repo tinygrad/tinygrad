@@ -59,7 +59,8 @@ def _parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
       except ValueError: pass
   return tests
 
-def _get_tests_uncached(f: str, arch: str) -> list[tuple[str, bytes]]:
+@functools.cache
+def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
   text = fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore')
   if arch == "rdna3":
     # Match GFX11 and W32 only (wavefront32 mode)
@@ -77,9 +78,6 @@ def _get_tests_uncached(f: str, arch: str) -> list[tuple[str, bytes]]:
   if arch == "cdna" and not ('gfx942' in f or 'gfx950' in f or 'gfx90a' in f):
     tests = llvm_filter_valid_asm(tests, get_target(arch), get_mattr(arch))
   return tests
-
-@functools.cache
-def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]: return _get_tests_uncached(f, arch)
 
 def _make_test(f: str, arch: str, test_type: str):
   def test(self):

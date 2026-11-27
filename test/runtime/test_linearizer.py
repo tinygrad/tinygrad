@@ -174,7 +174,6 @@ class TestLinearizer(unittest.TestCase):
             Opt(OptOps.SPLIT, 3, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
             Opt(OptOps.SPLIT, 1, (2, AxisType.UPCAST))] # upcast accs in both reduces
     ast = helper_linearizer_opt(out, opts=[opt])
-    def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     local_stores = [u for u in uops if u.op is Ops.STORE and u.addrspace == AddrSpace.LOCAL]
     global_stores = [u for u in uops if u.op is Ops.STORE and u.addrspace == AddrSpace.GLOBAL]

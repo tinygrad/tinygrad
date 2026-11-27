@@ -40,8 +40,6 @@ class TestSymbolic(unittest.TestCase):
     self.assert_tuple_equal(t.shape, (3, i+j+k))
 
 class TestSymbolicVarVals(unittest.TestCase):
-  def assert_equal(self, x, y): self.assertFalse(x != y)
-
   def test_shrink_unbind(self):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(2)
