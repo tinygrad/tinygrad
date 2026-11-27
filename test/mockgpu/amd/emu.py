@@ -1867,15 +1867,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
   regions = cfg_regions(cfg["paths"], 0)
-  # propagate possible wave PCs across acyclic regions; loops retain runtime routing.
-  unconditional:set[int] = set()
-  possible:set[int]|None = {0}
-  for pc, body in regions:
-    if body: possible = None
-    elif possible is not None:
-      if possible == {pc}: unconditional.add(pc)
-      possible = (possible-{pc}) | (set(cfg["paths"][pc]) or {-1})
-  routed = len(unconditional) != len(regions)
+  routed = any(body or len(cfg["paths"][pc]) > 1 for pc, body in regions)
   axes = itertools.count(sum(inst.size() for inst in insts.values()))
   gx, gy, gz, lx, ly, lz, rsrc2, scratch_size = dispatch
   # init ranges
@@ -1946,8 +1938,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     params.append(UOp.param(len(bufs), dtypes.int, addrspace=AddrSpace.ALU))
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, dtype=dtypes.int)
-    gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
-                                                            1, dtype=dtypes.int),)
+    gates = (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
+                       1, dtype=dtypes.int),) if routed else ()
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("emu_waves"))
