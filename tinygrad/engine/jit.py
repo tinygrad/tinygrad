@@ -5,7 +5,8 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, AddrSpace
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
-from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import capturing, link_linear, run_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.codegen import create_linear
 from tinygrad.codegen.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters

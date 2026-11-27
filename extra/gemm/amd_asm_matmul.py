@@ -13,7 +13,9 @@ from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.engine.realize import Estimates, compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import link_linear, run_linear
+from tinygrad.renderer import Estimates
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.renderer.amd.dsl import s, v, VCC_LO, NULL
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 

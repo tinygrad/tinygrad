@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import GlobalCounters, Target
-from tinygrad.engine.realize import compile_linear, estimate_uop
+from tinygrad.codegen.compile import compile_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo

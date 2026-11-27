@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from examples.openpilot.load_pickle import make_inputs
 from tinygrad.helpers import Context, DEV, fetch, getenv
-from tinygrad.engine.realize import lower_and_compile
+from tinygrad.codegen.compile import lower_and_compile
 from tinygrad.uop.ops import Ops
 from examples.openpilot.helpers import load_pickle, make_retargetable
 

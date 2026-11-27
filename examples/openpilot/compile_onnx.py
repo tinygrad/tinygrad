@@ -6,7 +6,7 @@ from tinygrad import Tensor, Device, TinyJit, Context, dtypes
 from tinygrad.dtype import _to_np_dtype
 from tinygrad.helpers import fetch, DEBUG
 from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
-from tinygrad.engine.realize import lower_and_compile
+from tinygrad.codegen.compile import lower_and_compile
 from examples.openpilot.helpers import allocate_inputs, dump_pickle, load_pickle, make_retargetable, benchmark
 
 def onnx_metadata(path):

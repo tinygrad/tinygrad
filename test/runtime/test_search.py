@@ -1,7 +1,7 @@
 import unittest
 
 from tinygrad import Tensor, UOp
-from tinygrad.engine.realize import compile_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops
 

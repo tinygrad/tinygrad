@@ -7,7 +7,8 @@ from tinygrad.device import Compiled, ProfileGraphEvent, host_of
 from tinygrad.helpers import Context, unwrap, to_tuple
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, ParamArg
 from tinygrad.uop.uir import render_uir, parse_uir
-from tinygrad.engine.realize import compile_linear, get_call_arg_uops, lower_and_compile, run_linear
+from tinygrad.engine.realize import run_linear
+from tinygrad.codegen.compile import compile_linear, get_call_arg_uops, lower_and_compile
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQInfo
 

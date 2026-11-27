@@ -7,7 +7,8 @@ from tinygrad.runtime.support.hcq2 import layout_args, make_program, ins
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices, PCIIfaceBase, MAP_FIXED
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
-from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, lower_and_compile, run_linear
+from tinygrad.engine.realize import get_call_kernel_args, run_linear
+from tinygrad.codegen.compile import get_call_arg_uops, lower_and_compile
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, host_of
 from tinygrad.renderer import TinyELF
 from tinygrad.dtype import dtypes, DType, AddrSpace

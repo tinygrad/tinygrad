@@ -4,7 +4,8 @@ from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, BufferSpec, Compiled
-from tinygrad.engine.realize import run_linear, lower_and_compile, link_linear
+from tinygrad.engine.realize import run_linear, link_linear
+from tinygrad.codegen.compile import lower_and_compile
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
