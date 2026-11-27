@@ -1770,7 +1770,7 @@ def lower_body(sink:UOp) -> UOp:
 
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
 
-def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|None]:
+def instruction_call(inst:Inst, arch:str) -> tuple[UOp, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size()), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
@@ -1783,10 +1783,10 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
     name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
     call = lower_body(sink.replace(arg=KernelInfo(name)))
     ret = call, ctx.branch_cond
-    entries.append(ctx.canonical_mask(inst_bytes)+(ret,))
+    entries.append((base, mask, ret))
   call, cond = ret
   words = {_Ctx.inst_word(i):_c((bits >> (32*i)) & 0xffffffff) for i in range(inst.size()//4)}
-  if call is not None: call = call.replace(src=(UOp.native(inst, call.body), *(words.get(b, b) for b in call.src[1:])))
+  call = call.replace(src=(UOp.native(inst, call.body), *(words.get(b, b) for b in call.src[1:])))
   return call, cond.substitute(words) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
@@ -1902,9 +1902,9 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     cond = UOp.const(True)
     instructions = []
     for off in cfg["blocks"][block_pc]:
-      call, branch_cond = instruction_call(insts[off], arch, renderer)
+      call, branch_cond = instruction_call(insts[off], arch)
       if branch_cond is not None: cond = branch_cond
-      if call is not None: instructions.append(call)
+      instructions.append(call)
     values = {ctx.scratch_stride:_c(scratch_size)}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
