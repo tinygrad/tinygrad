@@ -55,7 +55,6 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.codegen import to_program, to_program_config
-from tinygrad.renderer import Renderer
 from tinygrad.helpers import Context, DEV, to_mv, mv_address, ContextVar
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, get_elf_section
@@ -1783,10 +1782,10 @@ def lower_body(sink:UOp) -> UOp:
   body = sink.substitute({b:UOp.param(i, b.dtype, b.shape, name=b.arg.name, addrspace=b.addrspace) for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs)
 
-instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
+instruction_cache:dict[tuple[str, type[Inst]], list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
 
-def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|None]:
-  entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
+def instruction_call(inst:Inst, arch:str) -> tuple[UOp, UOp|None]:
+  entries = instruction_cache.setdefault((arch, type(inst)), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
@@ -1798,10 +1797,10 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
     name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
     call = lower_body(sink.replace(arg=KernelInfo(name)))
     ret = call, ctx.branch_cond
-    entries.append(ctx.canonical_mask(inst_bytes)+(ret,))
+    entries.append((base, mask, ret))
   call, cond = ret
   words = {_Ctx.inst_word(i):_c((bits >> (32*i)) & 0xffffffff) for i in range(inst.size()//4)}
-  if call is not None: call = call.replace(src=(UOp.native(inst, call.body), *(words.get(b, b) for b in call.src[1:])))
+  call = call.replace(src=(UOp.native(inst, call.body), *(words.get(b, b) for b in call.src[1:])))
   return call, cond.substitute(words) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
@@ -1817,7 +1816,7 @@ def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
     seen.update(nodes)
     linear.extend(nodes)
     linear.append(call.replace(src=(call.body, *args)))
-  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
+  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block")), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 # a block has an empty body; a loop contains its header block and the rest of its iteration.
 CFGRegion = tuple[int, list["CFGRegion"]]
@@ -1864,7 +1863,7 @@ pm_remove_native = PatternMatcher([
 PC_INSTS = ("S_GETPC", "S_SETPC")
 
 @rewrite_group(replay="emu_process_replay")
-def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="", trace_words:int=0, trace_wgs:int=0) -> UOp:
+def lift(code:bytes, arch:str, dispatch:tuple, name:str="", trace_words:int=0, trace_wgs:int=0) -> UOp:
   insts = amd_decode(code, arch)
   assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
@@ -1927,9 +1926,9 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="", t
     for off in cfg["blocks"][block_pc]:
       if trace_words and not getattr(insts[off], "op_name", "").startswith("S_CODE_END"):
         instructions.append(_trace_inst(ctx, trace_words, off, insts[off]))
-      call, branch_cond = instruction_call(insts[off], arch, renderer)
+      call, branch_cond = instruction_call(insts[off], arch)
       if branch_cond is not None: cond = branch_cond
-      if call is not None: instructions.append(call)
+      instructions.append(call)
     values:dict[UOp, UOp] = {ctx.scratch_stride:_c(scratch_size)}
     if trace_words: values[ctx.trace_en] = wg < _c(trace_wgs, dtypes.u64)
     if routed:
@@ -1938,7 +1937,6 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="", t
       values.update({taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2
                     else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)})
       instructions.append(lower_body(route[0].store(target).sink(arg=KernelInfo("emu_branch"))))
-    if not instructions: return end
     body, bufs = instruction_block(instructions)
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
     args += [_c(block_pc, dtypes.int).after(end, *scopes)]
@@ -1964,7 +1962,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="", t
         end = emit_block(pc, end, scopes)
     return end
 
-  ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
+  ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name))
   ret = graph_rewrite(ret, pm_remove_native, name="remove native", enter_calls=True)
   return ret
 
@@ -1984,11 +1982,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     renderer = Device['CPU'].renderer
     tkey = (trace_words, trace_wgs) if trace_words else ()
     if (key:=(code, arch, dispatch, name, *tkey, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}", trace_words, trace_wgs), renderer)
+      dispatch_cache[key] = to_program(lift(code, arch, dispatch, f"emu {name}", trace_words, trace_wgs), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
-          ret = to_program(lift(relift_lib, arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}"), Device["AMD"].renderer)
+          ret = to_program(lift(relift_lib, arch, dispatch, f"relift_{relift_count} {name}"), Device["AMD"].renderer)
         except Exception:
           print("relift err", traceback.format_exc())
           break
