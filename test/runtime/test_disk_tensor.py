@@ -300,6 +300,12 @@ class TestDiskTensor(TempDirTestCase):
     with self.assertRaises(RuntimeError, msg="advanced setitem is not supported for DISK tensors"):
       dt[Tensor([0, 2]), Tensor([1, 3])] = 99
 
+  def test_assign_const_to_disk(self):
+    # assign from CONST (Tensor.full) to disk - source has no buffer, needs contiguous first
+    dt = Tensor.empty(4, device=f"disk:{self.tmp('dt_assign_const')}", dtype=dtypes.int32)
+    dt.assign(Tensor.full((4,), 42, dtype=dtypes.int32)).realize()
+    np.testing.assert_array_equal(dt.numpy(), [42, 42, 42, 42])
+
   def test_assign_slice_from_const(self):
     # slice assign from CONST to disk - tests size calculation when no RANGE ops
     dt = Tensor([0, 1, 2, 3], dtype=dtypes.int32).to(f"disk:{self.tmp('dt_slice_const')}")
@@ -525,6 +531,10 @@ class TestDiskTensorMovement(TempDirTestCase):
     t = Tensor(self.fn)
     self.assertTrue(Tensor.all(t.to(None) == Tensor.arange(100, dtype=dtypes.uint8)).item())
 
+  def test_permuted_copy(self):
+    t = Tensor(self.fn).reshape(10, 10).T.to("CPU")
+    np.testing.assert_array_equal(t.numpy(), np.arange(100, dtype=np.uint8).reshape(10, 10).T)
+
   def test_contiguous_permuted_copy(self):
     t = Tensor(self.fn).reshape(10, 10).T.contiguous().to("CPU")
     np.testing.assert_array_equal(t.numpy(), np.arange(100, dtype=np.uint8).reshape(10, 10).T)
@@ -537,6 +547,10 @@ class TestDiskTensorMovement(TempDirTestCase):
           if contiguous: t = t.contiguous()
           np.testing.assert_array_equal(t.to("CPU").numpy(), np.arange(offset, offset+4, dtype=np.uint8).reshape(2, 2).T)
           self.assertEqual(self.fn.read_bytes(), bytes(range(100)))
+
+  def test_slice_read(self):
+    t = Tensor(self.fn)
+    self.assertListEqual(t[16:18].tolist(), [16,17])
 
   def test_slice_read_cat(self):
     t = Tensor(self.fn)

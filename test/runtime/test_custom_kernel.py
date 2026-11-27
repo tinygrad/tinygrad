@@ -833,6 +833,19 @@ class TestUnshardStore(unittest.TestCase):
   def test_store_load_local_fragment(self): self._test_store_load_fragment(AddrSpace.LOCAL)
 
 class TestUOpReduce(unittest.TestCase):
+  def test_uop_sum(self):
+    a = Tensor([1.0, 2, 3, 4, 5])
+    self.assertAlmostEqual(Tensor(a.uop.sum(axis=0)).item(), 15.0)
+
+  def test_uop_sum_2d(self):
+    a = Tensor.arange(6).reshape(2, 3).float()
+    result = Tensor(a.uop.sum(axis=1)).numpy()
+    assert result[0] == 3 and result[1] == 12
+
+  def test_uop_sum_all(self):
+    a = Tensor.arange(6).reshape(2, 3).float()
+    self.assertAlmostEqual(Tensor(a.uop.sum()).item(), 15.0)
+
   def test_uop_sum_negative_axis(self):
     a = Tensor.arange(6).reshape(2, 3).float()
     result = Tensor(a.uop.sum(axis=-1)).numpy()
@@ -847,6 +860,10 @@ class TestUOpReduce(unittest.TestCase):
   def test_uop_prod(self):
     a = Tensor([1.0, 2, 3, 4, 5])
     self.assertAlmostEqual(Tensor(a.uop.prod(axis=0)).item(), 120.0)
+
+  def test_uop_max(self):
+    a = Tensor([1.0, 5, 3, 2, 4])
+    self.assertAlmostEqual(Tensor(a.uop.max(axis=0)).item(), 5.0)
 
   def test_uop_max_2d(self):
     a = Tensor([[1, 5, 3], [4, 2, 6]]).float()

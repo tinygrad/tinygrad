@@ -25,6 +25,7 @@ def uand(ops): return functools.reduce(lambda x,y: x*y, ops)
 
 class TestSymbolicPickle(unittest.TestCase):
   def _test_pickle_unpickle(self, x): self.assertEqual(x, pickle.loads(pickle.dumps(x)))
+  def test_pickle_variable(self): self._test_pickle_unpickle(Variable("a", 3, 8))
   def test_pickle_variable_times_2(self): self._test_pickle_unpickle(Variable("a", 3, 8)*2)
 
 class TestSymbolic(unittest.TestCase):
@@ -41,6 +42,10 @@ class TestSymbolic(unittest.TestCase):
     # eval the test string and see if we get the same uop
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
+
+  def test_cmp_simple(self):
+    self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "(a<8).eq(False)")
 
   def test_ge(self):
     self.helper_test_variable(Variable("a", 3, 8) >= 77, 0, 0, "False")
@@ -135,6 +140,19 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((a*5).divide_exact(a*10), None)
     self.assertEqual((a*10-1).divide_exact(a*10), None)
 
+  def test_factorize(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
+    self.helper_test_variable(b+a*2+a*3, 0, 8*6, "(b+(a*5))")
+
+  def test_factorize_no_mul(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
+    self.helper_test_variable((a+b)+a*3, 0, 8*5, "(b+(a*4))")
+    self.helper_test_variable((a*3+b)+b*3, 0, 8*7, "((a*3)+(b*4))")
+
   def test_neg(self):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
 
@@ -153,6 +171,9 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
+
+  def test_sub_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, "(a+-1)")
 
   def test_const_var(self):
     self.helper_test_variable(Variable("fake", 1, 1), 1, 1, "1")
@@ -173,9 +194,15 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")
 
+  def test_mul_1(self):
+    self.helper_test_variable(Variable("a", 0, 8)*1, 0, 8, "a")
+
   def test_mul_neg_1(self):
     self.helper_test_variable((Variable("a", 0, 2)*-1)//3, -1, 0, "((a*-1)//3)")
     self.helper_test_variable((Variable("a", 2, 7)*-1)//3, -3, -1, "((a*-1)//3)")
+
+  def test_mul_2(self):
+    self.helper_test_variable(Variable("a", 0, 8)*2, 0, 16, "(a*2)")
 
   def test_div_1(self):
     self.helper_test_variable(Variable("a", 0, 8)//1, 0, 8, "a")
@@ -189,6 +216,9 @@ class TestSymbolic(unittest.TestCase):
   def test_add_min_max(self):
     self.helper_test_variable(Variable("a", 0, 8) * 2 + 12, 12, 16+12, "((a*2)+12)")
 
+  def test_div_remove(self):
+    self.helper_test_variable(Variable("a", 0, 7) // 20, 0, 0, "0")
+
   def test_div_neg_min_max(self):
     self.helper_test_variable(Variable("a", 1, 7) // -2, -4, -1, "(a//-2)")
     self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "(a//-2)")
@@ -198,6 +228,9 @@ class TestSymbolic(unittest.TestCase):
       (Variable("a", 0, 7) // 0).simplify()
     with self.assertRaises(ZeroDivisionError):
       (Variable("a", 0, 7) % 0).simplify()
+
+  def test_sum_div_remove(self):
+    self.helper_test_variable(usum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
 
   def test_sum_div_min_max(self):
     self.helper_test_variable(usum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 2, 0, 5, "((a+b)//2)")
@@ -211,6 +244,11 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_div_trim_const(self):
     self.helper_test_variable((Variable("a", 0, 7)*4 + Variable("b", 0, 3)*4 + 7) // 16, 0, 2, "(((a+b)+1)//4)")
+
+  def test_sum_div_some_partial_factor(self):
+    self.helper_test_variable(usum([Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 0, 5, "(((a*3)+(b*3))//8)")
+    self.helper_test_variable(usum([uconst(16), Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 1, 6, "((((a*3)+(b*3))//8)+1)")
+    self.helper_test_variable((Variable("a", 0, 7)*30+20)//20, 1, 11, "((a+(a//2))+1)")
 
   def test_sum_div_no_factor(self):
     self.helper_test_variable(usum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "((a*2)+(b*2)+((a+b)//2))")
@@ -254,6 +292,14 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_to_sub(self):
     self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, "(a+-1)")
 
+  def test_mod_congruence(self):
+    self.helper_test_variable((3+3*Variable("a",0,3))%4, 0, 3, "((a*-1)+3)")
+    self.helper_test_variable((17+13*Variable("a",0,3))%18, 2, 17, "((a*-5)+17)")
+    self.helper_test_variable((2+9*Variable("a",0,3))%18, 2, 11, "(((a%2)*9)+2)")
+
+  def test_mod_congruence_mul_add(self):
+    self.helper_test_variable((6*(Variable("a", 0, 2)+1))%9, 0, 6, "((a*-3)+6)")
+
   def test_mod_congruence_multiple_vars(self):
     self.helper_test_variable((9+9*Variable("x",0,3)+9*Variable("y",0,3))%10, 3, 9, "(((x*-1)+(y*-1))+9)")
     self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9,
@@ -268,6 +314,9 @@ class TestSymbolic(unittest.TestCase):
   def test_div_congruence(self):
     self.helper_test_variable((3+3*Variable("a",0,3))//4, 0, 3, "a")
     self.helper_test_variable((18+17*Variable("a",0,2)+17)//18, 1, 3, "(a+1)")
+
+  def test_div_congruence_multiple_vars(self):
+    self.helper_test_variable((9+(9+10)*Variable("x",0,3)+(8+10)*Variable("y",0,2))//10, 0, 10, "((x*2)+(y*2))")
 
   def test_mod_binary_expression(self):
     self.helper_test_variable((3+Variable("a",0,1))%4, 0, 3, "((a*-3)+3)")
@@ -378,6 +427,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", -20, 1)%10, 0, 9, "(a%10)")
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
     self.helper_test_variable(Variable("a", -1, 20)%10, 0, 9, "(a%10)")
+
+  def test_ge_remove(self):
+    self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "False")
+
+  def test_lt_remove(self):
+    self.helper_test_variable(Variable("a", 0, 6) < -3, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 0, 6) < 3, 0, 1, "(a<3)")
+    self.helper_test_variable(Variable("a", 0, 6) < 8, 1, 1, "True")
 
   def test_cast_bool(self):
     self.helper_test_variable(Variable("a", 0, 10).cast(dtypes.bool), 0, 1, "a!=0")
@@ -679,6 +736,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((((alu2+150)//(-32))+4), -1, -1, "-1")
     self.helper_test_variable((((alu2+158)//(-32))+4), -1, -1, "-1")
 
+  def test_div_mod_recombine_partial(self):
+    gidx = Variable("gidx", 0, 15)
+    self.helper_test_variable((gidx//2)%4+(gidx//8)*4, 0, 7, "gidx//2")
+
   def test_div_mod_recombine_folded_mod(self):
     a = Variable("a", 0, 2)
     b = Variable("b", 0, 100)
@@ -708,6 +769,13 @@ class TestSymbolic(unittest.TestCase):
     exp = (16 * b + 2) % 18 + ((16 * b + 2) // 18) * 18
     self.helper_test_variable(exp, 2, 1602, "((b*16)+2)")
     self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
+
+  def test_div_partial_quotient(self):
+    # DIV should extract partial quotients when const_factor > divisor, matching what MOD already does
+    # (f*x+c)//d -> (f%d*x+c)//d + (f//d)*x  when f >= d
+    b = Variable("b", 0, 100)
+    self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
+    self.helper_test_variable((19*b+3)//7, 0, 271, "(((b*5)+3)//7+(b*2))")
 
   def test_gcd_with_remainder(self):
     # nest_by_factor on the GCD of non-constant terms and denominator
@@ -839,6 +907,10 @@ class TestSymbolic(unittest.TestCase):
     # recombine should work inside larger additive sums, not just in the two special y+... tree shapes
     self.helper_test_variable((x//8)*4 + y + (x//2)%4, 0, 20, "(y+x//2)")
     self.helper_test_variable(y + (x//8)*4 + (x//2)%4, 0, 20, "(y+x//2)")
+
+  def test_div_mod_recompose_low_order_remainder(self):
+    x = Variable("x", 0, 127)
+    self.helper_test_variable((x//2)%4*2 + x%2, 0, 7, "(x%8)")
 
   def test_reshape_index_roundtrip(self):
     # simulate reshape index decompose then recompose — the core pattern this enables
@@ -1117,6 +1189,13 @@ class TestSymbolicNumeric(unittest.TestCase):
         self.assertLessEqual(v.vmin, min(values))
         self.assertGreaterEqual(v.vmax, max(values))
 
+  def test_mod_4(self): self.helper_test_numeric(lambda x: (x%4))
+  def test_div_4(self): self.helper_test_numeric(lambda x: (x//4))
+  def test_plus_1_div_2(self): self.helper_test_numeric(lambda x: (x+1)//2)
+  def test_plus_1_mod_2(self): self.helper_test_numeric(lambda x: (x+1)%2)
+  def test_times_2(self): self.helper_test_numeric(lambda x: x*2)
+  def test_times_2_plus_3(self): self.helper_test_numeric(lambda x: x*2 + 3)
+  def test_times_2_plus_3_mod_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)%4)
   def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
   def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
 
@@ -1167,6 +1246,10 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.const(4, dtypes.int) + 7
     self.assertEqual(int(u), 11)
 
+  def test_lt(self):
+    u = UOp.const(4) < 7
+    self.assertTrue(u)
+
   def test_rfloordiv(self):
     u = 8 // UOp.const(4, dtypes.int)
     self.assertEqual(int(u), 2)
@@ -1182,6 +1265,10 @@ class TestUOpResolve(unittest.TestCase):
   def test_ne(self):
     u = UOp.const(4) != 7
     self.assertTrue(u)
+
+  def test_ne_f(self):
+    u = UOp.const(4) != 4
+    self.assertFalse(u)
 
   def test_ngt(self):
     u = UOp.const(4) > 7
@@ -1203,9 +1290,21 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.const(4.5, dtypes.float) + 7
     self.assertEqual(float(u), 11.5)
 
+  def test_var_cmp_t(self):
+    u = UOp.variable("i", 1, 10) < 20
+    self.assertTrue(u)
+
   def test_var_cmp_t2(self):
     u = UOp.variable("i", 1, 10)//2 < 20
     self.assertTrue(u)
+
+  def test_var_cmp_f(self):
+    u = UOp.variable("i", 1, 10) < 1
+    self.assertFalse(u)
+
+  def test_var_cmp_f2(self):
+    u = UOp.variable("i", 1, 10) > 11
+    self.assertFalse(u)
 
   def test_or_true(self):
     u = UOp.variable("b", False, True, dtypes.bool) | True
@@ -1249,6 +1348,11 @@ class TestUOpResolve(unittest.TestCase):
     # TODO: improve
     with self.assertRaises(ValueError):
       bool(u)
+
+  def test_var_cmp_assert(self):
+    with self.assertRaises(ValueError):
+      u = UOp.variable("i", 1, 10) < 5
+      self.assertFalse(u)
 
   def test_plus_ordering_lt(self):
     i = UOp.variable("i", 1, 10)

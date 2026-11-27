@@ -3,6 +3,10 @@ from tinygrad import Tensor, dtypes
 # test cases are modified from pytorch test_indexing.py
 
 class TestIndexing(unittest.TestCase):
+  def test_single_int(self):
+    v = Tensor.randn(5, 7, 3)
+    self.assertEqual(v[4].shape, (7, 3))
+
   def test_multiple_int(self):
     v = Tensor.randn(5, 7, 3)
     self.assertEqual(v[4].shape, (7, 3))
@@ -20,6 +24,12 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(v[[0, 4, 2]].shape, (3, 7, 3))
     self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
     self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
+
+  def test_index_src_datatype(self):
+    src = Tensor.ones(3, 2, 4)
+    # test index
+    res = src[[0, 2, 1], :, :]
+    self.assertEqual(res.shape, src.shape)
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)

@@ -47,6 +47,16 @@ class TestMemoryCount(unittest.TestCase):
     _, mem = get_stats(a+b)
     self.assertEqual(mem, 1024*1024*2 + 1024)  # 1 full read + 1 lil read + 1 write
 
+  def test_self_add(self):
+    a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)
+    _, mem = get_stats(a+a)
+    self.assertEqual(mem, 1024*1024*2)  # 1 read + 1 write
+
+  def test_self_add_transposed(self):
+    a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)
+    _, mem = get_stats(a+a.T)
+    self.assertEqual(mem, 1024*1024*2)  # 1 read + 1 write
+
   def test_self_add_assign(self):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8).realize()
     _, mem = get_stats(a.assign(a+a))

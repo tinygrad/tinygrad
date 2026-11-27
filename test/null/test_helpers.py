@@ -102,10 +102,12 @@ class TestMergeDicts(unittest.TestCase):
       merge_dicts([a, d])
 
 class TestStripParens(unittest.TestCase):
+  def test_simple(self): self.assertEqual("1+2", strip_parens("(1+2)"))
   def test_nested(self): self.assertEqual("1+(2+3)", strip_parens("(1+(2+3))"))
   def test_casted_no_strip(self): self.assertEqual("(int)(1+2)", strip_parens("(int)(1+2)"))
   def test_unmatched_parens(self): self.assertEqual("((c35+c39>>23&255)+-127).cast(dtypes.float)",
     strip_parens("((c35+c39>>23&255)+-127).cast(dtypes.float)"))
+  def test_single_paren_left(self): self.assertEqual("(abc", strip_parens("(abc"))
   def test_single_paren_right(self): self.assertEqual("abc)", strip_parens("abc)"))
   def test_parens_at_different_depths(self): self.assertEqual("(a+(b))*(c)", strip_parens("(a+(b))*(c)"))
 
@@ -277,6 +279,7 @@ class TestPolyN(unittest.TestCase):
     np.testing.assert_allclose(eval_uop(polyN(UOp.const(4.0).cast(dtypes.float), [1.0, -2.0, 1.0])), 9.0)
 
 class TestTimeToStr(unittest.TestCase):
+  def test_seconds(self):           self.assertEqual("   10.01s ", time_to_str(10.01))
   def test_boundary_sec_ms(self):   self.assertEqual("10000.00ms", time_to_str(10))
   def test_milliseconds(self):      self.assertEqual("  500.00ms", time_to_str(0.5))
   def test_boundary_ms_us(self):    self.assertEqual("10000.00us", time_to_str(0.01))
@@ -311,6 +314,12 @@ class TestCStyleDivMod(unittest.TestCase):
     self.assertEqual(cmod(9, -5), 4)
 
 class TestGetBits(unittest.TestCase):
+  def test_low_bits(self):
+    self.assertEqual(getbits(0b11010110, 0, 3), 0b0110)
+
+  def test_high_bits(self):
+    self.assertEqual(getbits(0b11010110, 4, 7), 0b1101)
+
   def test_middle_bits(self):
     self.assertEqual(getbits(0b11010110, 3, 5), 0b010)
 
@@ -326,6 +335,8 @@ class TestArgFix(unittest.TestCase):
     self.assertEqual(argfix(None, None), (None, None))
   def test_positional_arguments(self):
     self.assertEqual(argfix(1, 2, 3), (1, 2, 3))
+  def test_tuple(self):
+    self.assertEqual(argfix((1., 2., 3.)), (1., 2., 3.))
   def test_list(self):
     self.assertEqual(argfix([True, False]), (True, False))
 
@@ -368,6 +379,8 @@ class TestIsNumpyNdarray(unittest.TestCase):
     self.assertTrue(is_numpy_ndarray(np.array([1, 2, 3])))
   def test_ndarray_tolist(self):
     self.assertFalse(is_numpy_ndarray(np.array([1, 2, 3]).tolist()))
+  def test_list(self):
+    self.assertFalse(is_numpy_ndarray([1, 2, 3]))
   def test_tensor(self):
     self.assertFalse(is_numpy_ndarray(Tensor([1, 2, 3])))
     self.assertFalse(is_numpy_ndarray(Tensor(np.array([1, 2, 3]))))

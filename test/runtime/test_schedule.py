@@ -74,6 +74,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(*check_schedule(x.shrink((None, (0, 2))).assign(a.clone()), 2))
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
+  def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
   def test_assign_non_contiguous(self, alt=False):
     x = (Tensor.arange(16)-100).reshape(4,4).clone().realize()
     xref = x.numpy()
@@ -99,6 +100,8 @@ class TestSchedule(unittest.TestCase):
     run_schedule(linear, externs)
     self.assertListEqual(a.tolist(), expected)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
+  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
+
   def test_setitem_overlapping_slice_temp_size(self):
     a = Tensor.empty(128)
     a[10:14] = a[11:15]

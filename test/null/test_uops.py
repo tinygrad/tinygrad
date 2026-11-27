@@ -640,6 +640,7 @@ class TestUOpRender(unittest.TestCase):
 class TestContiguousViewOffset(unittest.TestCase):
   def _check(self, u, expected): self.assertEqual(u.contiguous_view_offset(), expected)
 
+  def test_simple(self): self._check(UOp.empty(10), 0)
   def test_shrink(self): self._check(UOp.empty(10)[1:8], 1)
   def test_2d(self): self._check(UOp.empty(2,5)[1, 2:4], 7)
   def test_shrink_to_one(self): self._check(UOp.empty(10)[1], 1)

@@ -51,6 +51,11 @@ class TestSubBuffer(unittest.TestCase):
     self.buf = Buffer(Device.DEFAULT, 10, initial_value=bytes(range(10)))
     self.buf_unalloc = Buffer(Device.DEFAULT, 10)
 
+  def test_subbuffer(self):
+    vbuf = self.buf.view(2, offset=3).ensure_allocated()
+    tst = vbuf.as_memoryview().tolist()
+    assert tst == [3, 4]
+
   def test_subbuffer_cast(self):
     # NOTE: bitcast depends on endianness
     vbuf = self.buf.view(4, offset=3).ensure_allocated()
@@ -165,6 +170,11 @@ class TestSubBuffer(unittest.TestCase):
     data_out_base = bytearray([0]*10)
     data_out_base[:] = self.buf.as_memoryview()
     assert expected_base_data == data_out_base
+
+  def test_subbuffer_dealloc(self):
+    sub_buf = self.buf.view(4, offset=3).ensure_allocated()
+    sub_buf.deallocate()
+    assert self.buf.as_memoryview().tolist() == list(range(10))
 
   def test_subbuffer_double_dealloc(self):
     sub_buf = self.buf.view(3, offset=4).ensure_allocated()

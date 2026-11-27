@@ -76,6 +76,15 @@ class TestMemoryPlanner(unittest.TestCase):
     held_bufs.clear()
     global_map = {}
 
+  def test_simple_buffer(self):
+    bs = [
+      [b(0), b(1), b(2)],
+      [b(1), b(2), b(3)],
+      [b(4), b(3)],
+      [b(5), b(2)],
+    ]
+    check_assign(bs)
+
   def test_simple_pinned(self):
     bs = [
       [b(0, pin=True), b(1), b(2, pin=True)],

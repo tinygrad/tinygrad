@@ -33,6 +33,24 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
     self.assertTrue(math.isnan(log2_neg), f"Expected NaN for log2(-1.0), got {log2_neg}")
     self.assertTrue(math.isinf(recip_zero) and recip_zero > 0, f"Expected +inf for reciprocal(0.0), got {recip_zero}")
 
+class TestGEPAndVectorizeRewrite(unittest.TestCase):
+  def test_gep_single_element_extraction(self):
+    # GEP on a vector dtype to extract a single element
+    base_vector = UOp.const((1.0, 2.0, 3.0, 4.0))
+    self.assertIs(apply_rewrite(base_vector.index(2)), apply_rewrite(base_vector.src[2]))
+
+  def test_gep_tuple_extraction(self):
+    # GEP on a vector dtype to extract multiple elements as a vector
+    base_vector = UOp.const((1.0, 2.0, 3.0, 4.0))
+    self.assertIs(apply_rewrite(UOp.stack(*[base_vector.index(i) for i in (2, 3)])),
+                  apply_rewrite(UOp.stack(base_vector.src[2], base_vector.src[3])))
+
+  def test_vectorize_multiple_elements(self):
+    # Vectorizing multiple elements using GEP
+    base_vector = UOp.const((5.0, 10.0, 15.0, 20.0))
+    vectorized_uop = UOp.stack(*(base_vector.index(i) for i in range(4)))
+    self.assertIs(apply_rewrite(vectorized_uop), apply_rewrite(base_vector))
+
 
 import inspect
 from tinygrad.uop.ops import graph_rewrite, _substitute, rewrite_group
@@ -221,6 +239,12 @@ class TestWalkRewrite(unittest.TestCase):
 
   # *** top-down walk (default): process children first, then try pm on rebuilt node ***
 
+  def test_walk_topdown_simple_substitute(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = graph_rewrite(a + 4, _substitute, {a:b}, walk=True)
+    self.assertIs(ret, b+4)
+
   def test_walk_topdown_does_not_traverse_into_replacement(self):
     """Top-down walk: replacement subtrees are NOT re-entered."""
     a = UOp.variable('a', 0, 10)
@@ -287,6 +311,12 @@ class TestWalkRewrite(unittest.TestCase):
     self.assertEqual(visited, [1, 2, Ops.ADD])
 
   # *** bottom-up walk: try bpm on node first, skip children if it matches ***
+
+  def test_walk_bottomup_simple_substitute(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = graph_rewrite(a + 4, _substitute, {a:b}, bottom_up=True, walk=True)
+    self.assertIs(ret, b+4)
 
   def test_walk_bottomup_does_not_traverse_into_replacement(self):
     """Bottom-up walk: replacement subtrees are NOT entered."""

@@ -68,6 +68,16 @@ class TestRegisters(unittest.TestCase):
     self.assertEqual(repr(src[208]), "-16")
 
 class TestEnumBitField(unittest.TestCase):
+  def test_enum_name(self):
+    self.assertEqual(VOP1Op.V_MOV_B32_E32.name, "V_MOV_B32_E32")
+
+  def test_enum_value(self):
+    self.assertEqual(VOP1Op.V_MOV_B32_E32.value, 1)
+
+  def test_enum_comparison(self):
+    self.assertEqual(VOP1Op.V_MOV_B32_E32, VOP1Op.V_MOV_B32_E32)
+    self.assertNotEqual(VOP1Op.V_NOP_E32, VOP1Op.V_MOV_B32_E32)
+
   def test_enum_different_types(self):
     # VOP1Op and VOP2Op are different enums, even if same value
     self.assertNotEqual(VOP1Op.V_MOV_B32_E32, VOP2Op.V_CNDMASK_B32_E32)

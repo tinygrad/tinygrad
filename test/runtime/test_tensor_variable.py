@@ -85,6 +85,15 @@ class TestTensorVariable(unittest.TestCase):
     v0 = Variable("z", 0, 10).bind(2)
     self.assertEqual((Tensor.ones(10).contiguous()[:v0] * Tensor(v0)).sum().item(), 4.0)
 
+  def test_inner_tvar_node(self):
+    vv = Variable("w", 0, 10).bind(2)
+    ret = Tensor(vv * 4).item()
+    assert ret == 8
+
+  def test_inner_tvar_mul(self):
+    vv = Variable("w", 0, 10).bind(2)
+    assert (Tensor(3) * vv).item() == 6
+
   def test_inner_tvar_mul_node(self):
     vv = Variable("w", 0, 10).bind(2)
     assert (Tensor(3) * (vv * 4)).item() == 24
@@ -122,6 +131,11 @@ class TestTensorVariable(unittest.TestCase):
     vv = Variable("a", 1, 10)
     ret = Tensor.arange(0, vv.bind(4))
     self.assertListEqual(ret[:4].tolist(), [0,1,2,3])
+
+  def test_symbolic_arange_sym_start(self):
+    vv = Variable("a", 1, 6)
+    ret = Tensor.arange(vv.bind(4), 7)
+    self.assertListEqual(ret[:3].tolist(), [4,5,6])
 
   def test_symbolic_arange_sym_step(self):
     vv = Variable("step", 1, 3)

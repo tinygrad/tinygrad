@@ -170,6 +170,8 @@ class TestAssign(unittest.TestCase):
     b.assign(2)
     b.realize()
     self.assertNotEqual(a.item(), b.item())
+  def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
+
   def test_assign_changes_buffer_alt(self):
     a, b = [Tensor(Tensor([0]).realize().uop.buf_uop) for _ in range(2)]
     Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
@@ -399,6 +401,21 @@ class TestAssign(unittest.TestCase):
     a = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
     a.bitcast(dtypes.uint32).assign(Tensor(self.REVERSED, dtype=dtypes.uint32)).realize()
     np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
+
+  def test_assign_bitcast_unrealized(self):
+    a = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    a.bitcast(dtypes.uint32).assign(Tensor(self.REVERSED, dtype=dtypes.uint32))
+    np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
+
+  def test_assign_double_bitcast(self):
+    b = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    b.bitcast(dtypes.uint32).bitcast(dtypes.int32).assign(Tensor(self.REVERSED, dtype=dtypes.int32)).realize()
+    np.testing.assert_allclose(b.numpy(), [4.0, 3.0, 2.0, 1.0])
+
+  def test_assign_shrink_then_bitcast(self):
+    c = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    c[0:2].bitcast(dtypes.uint32).assign(Tensor(self.REVERSED[:2], dtype=dtypes.uint32)).realize()
+    np.testing.assert_allclose(c.numpy(), [4.0, 3.0, 3.0, 4.0])
 
   def test_assign_bitcast_different_size(self):
     # assign to a shape-changing bitcast view

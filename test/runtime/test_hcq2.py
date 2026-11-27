@@ -191,6 +191,10 @@ class TestHostCalls(unittest.TestCase):
     a = UOp.from_buffer(Buffer("CPU", 8, initial_value=struct.pack("Q", 41)), dtypes.uint64)
     self.assertEqual(self._run(inc, self._buf(1), a), [42])
 
+  def test_addr_of_arg(self):
+    b = self._buf(16, dtypes.uint8)
+    self.assertEqual(self._run(addr_of, self._buf(1), b), [b.buffer.get_buf("CPU")])
+
   def test_addr_of_view(self):
     @uopfunc
     def addr(o:UOp, b:UOp): return o.index(0).store(b[4:8].getaddr("CPU")).sink()

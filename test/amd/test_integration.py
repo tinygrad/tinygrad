@@ -63,6 +63,10 @@ class TestRDNA3Asm(unittest.TestCase):
     inst = v_and_b32_e32(v[0], 10, v[0])
     self.assertEqual(inst.to_bytes(), _asm("v_and_b32_e32 v0, 10, v0"))
 
+  def test_sopp_s_endpgm(self):
+    inst = s_endpgm()
+    self.assertEqual(inst.to_bytes(), _asm("s_endpgm"))
+
   def test_sop1_s_mov_b32(self):
     inst = s_mov_b32(s[0], s[1])
     self.assertEqual(inst.to_bytes(), _asm("s_mov_b32 s0, s1"))

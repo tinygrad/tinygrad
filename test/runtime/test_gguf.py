@@ -54,11 +54,25 @@ class TestGGUFTables(unittest.TestCase):
 class TestGGUF(unittest.TestCase):
   def test_load_sample_q6_k(self): self._test_gguf_load("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
 
+  def test_dequantization_q8_0_hardcoded(self):
+    # Q8_0: 2 bytes float16 scale + 32 bytes int8 values, dequant = scale * values
+    block = np.frombuffer(np.float16(2.0).tobytes() + np.arange(1, 33, dtype=np.int8).tobytes(), dtype=np.uint8).copy()
+    expected = np.arange(1, 33, dtype=np.float32) * 2.0
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.Q8_0.value).numpy().flatten(), expected)
+
   def test_dequantization_iq1_s_hardcoded(self):
     # IQ1_S: d + qs[32] + qh[16]. qs=qh=0 -> grid[0]=all -1, scale=1, delta=+0.125 -> -0.875
     block = np.frombuffer(np.float16(1.0).tobytes() + bytes(48), dtype=np.uint8).copy()
     expected = np.full(256, -0.875, dtype=np.float32)
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 19).numpy().flatten(), expected)
+
+  def test_dequantization_mxfp4_hardcoded(self):
+    # MXFP4: 1 byte shared exponent E + 16 packed bytes (32 x 4-bit values)
+    # nibble: bit3=sign, bit2:1=exp, bit0=mant; E=128 gives scale=1.0
+    # codes 0-7 = [0, 1, 2, 3, 4, 6, 8, 12], codes 8-15 are their negatives
+    block = np.array([0x80] + list(range(16)), dtype=np.uint8)  # E=128, nibbles 0-15 in low, zeros in high
+    expected = np.array([0., 1., 2., 3., 4., 6., 8., 12., -0., -1., -2., -3., -4., -6., -8., -12.] + [0.]*16, dtype=np.float32)
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.MXFP4.value).numpy().flatten(), expected)
 
   def test_dequantization_q4_0(self): self._test_dequantization(GGMLQuantizationType.Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(GGMLQuantizationType.Q4_1)

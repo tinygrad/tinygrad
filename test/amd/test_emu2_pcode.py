@@ -9,6 +9,11 @@ from test.mockgpu.amd.pcode import parse_expr
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE
 from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp, GLOBALOp
 
+def _srcs():
+  """Create minimal source variables for pcode parsing."""
+  def u32(v=0): return UOp.const(v, dtypes.uint32)
+  return {'S0': u32(), 'S1': u32(), 'S2': u32(), 'SCC': u32(), 'VCC': UOp.const(0, dtypes.uint64), 'laneId': u32()}
+
 class TestBasicParsing(unittest.TestCase):
   """Test basic pcode parsing for common instruction patterns."""
 
@@ -39,6 +44,28 @@ class TestBasicParsing(unittest.TestCase):
   def test_unclosed_c_block(self):
     with self.assertRaisesRegex(AssertionError, 'unclosed pcode block'):
       parse_pcode('if (1) {\nvalue = 2;')
+
+  def test_v_add_f32(self):
+    """Test parsing V_ADD_F32 pcode."""
+    _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_F32_E32], _srcs())
+    self.assertEqual(len(assigns), 1)
+    dest, _ = assigns[0]
+    self.assertTrue(dest.startswith('D0'))
+
+  def test_v_lshlrev_b32(self):
+    """Test parsing V_LSHLREV_B32 pcode."""
+    _, assigns = parse_pcode(PCODE[VOP2Op.V_LSHLREV_B32_E32], _srcs())
+    self.assertEqual(len(assigns), 1)
+
+  def test_s_cselect_b32(self):
+    """Test parsing S_CSELECT_B32 pcode with ternary."""
+    _, assigns = parse_pcode(PCODE[SOP2Op.S_CSELECT_B32], _srcs())
+    self.assertEqual(len(assigns), 1)
+
+  def test_v_add_co_ci_u32(self):
+    """Test parsing V_ADD_CO_CI_U32 with carry."""
+    _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_CO_CI_U32_E32], _srcs())
+    self.assertGreaterEqual(len(assigns), 1)
 
 class TestWithSources(unittest.TestCase):
   """Test pcode parsing with actual source operand values."""

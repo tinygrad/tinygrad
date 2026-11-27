@@ -24,6 +24,8 @@ class TestFunction(unittest.TestCase):
     b = Tensor([4,5,6])
     c = f(a,b)
     np.testing.assert_equal((c[0]+c[1]).numpy(), [5*3,7*3,9*3])
+  def test_two_return_precompiled(self): self.test_two_return(True)
+
   def test_implicit_same_as_input(self):
     inp = Tensor([7,8,9])
     @function(allow_implicit=True)
@@ -373,6 +375,8 @@ class TestFunctionTuple(unittest.TestCase):
     print(t1.tolist(), t2.tolist())
     assert t1.tolist() == [2,2,2]
     assert t2.tolist() == [3,3,3]
+  def test_tuple_precompile(self): self.test_tuple(True)
+
   def test_grad_fxn_tuple(self):
     # grad_fxn for tuple: receives one gradient per output as positional args
     def grad_fxn(d_out0:UOp, d_out1:UOp, call:UOp):

@@ -93,6 +93,11 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float, buffer=False) + 2)
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
+  def test_invalid_binary_left(self):
+    mask = Tensor.arange(4) < 2
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), 2 + Tensor.full((4,), Invalid, dtype=dtypes.float, buffer=False))
+    self._invalid_test_helper(out, [1.0, 2.0, None, None])
+
   def test_invalid_reshape(self):
     mask = Tensor.arange(4) < 2
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid).reshape(2,2)

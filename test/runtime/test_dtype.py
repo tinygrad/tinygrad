@@ -209,6 +209,12 @@ class TestFp8sConversions(unittest.TestCase):
       self.assertEqual(Tensor([0.0, -0.0]).cast(dt).bitcast(dtypes.uint8).tolist(), [0, 0 if dt in dtypes.fp8_fnuz else 0x80])
 
 class TestBFloat16DType(unittest.TestCase):
+  def test_bf16_to_float(self):
+    _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32)
+
+  def test_float_to_bf16(self):
+    _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16)
+
   def test_bf16(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
     t.realize()

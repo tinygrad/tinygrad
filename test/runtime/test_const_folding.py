@@ -41,6 +41,11 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)))
     np.testing.assert_equal(Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)).numpy(), False)
 
+  def test_zero_size_ops(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]: # lambda x:x.max() NOTE: numpy gives "reduction operation maximum which has no identity"
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0)))
+      np.testing.assert_equal(reduceop(Tensor.empty(shape:=(1, 0))).numpy(), reduceop(np.empty(shape)))
+
   def test_zero_size_ops_view(self):
     for reduceop in [lambda x:x.prod(), lambda x:x.sum()]:
       _check_ast_count(0, reduceop(Tensor.empty(1, 0, 4).permute((1, 2, 0)).contiguous()))

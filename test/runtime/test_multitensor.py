@@ -330,6 +330,7 @@ class TestMultiTensor(unittest.TestCase):
     #assert t.uop.is_realized, "shard didn't realize"
     self.assertEqual(r.tolist(), out)
   def test_shard_reshape(self): self._test_shard_op(lambda t:t.reshape(2, 2), [[1.,1.],[1.,1.]])
+  def test_shard_elementwise(self): self._test_shard_op(lambda t:(t+t).reshape(2, 2), [[2.,2.],[2.,2.]])
   def test_alu_deviceless_const(self):
     s = Tensor([1.0, 2, 3, 4]).shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"), axis=0)
     np.testing.assert_equal((s + Tensor(UOp.const(1.0).cast(dtypes.float))).numpy(), [2, 3, 4, 5])
@@ -383,6 +384,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(O.numpy(), 2)
 
   def test_simple_add(self): return self._test_simple_add_axis(None, None)
+  def test_simple_add_X(self): return self._test_simple_add_axis(0, None)
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
 
   @given(strat.sampled_from((0, 1, None)), strat.sampled_from((0, 2)))
@@ -990,6 +992,11 @@ class TestMultiSetitem(unittest.TestCase):
     t = self._t(None)
     t[1] = 99
     self.assertListEqual(t.tolist(), [0,99,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_slice_cross_shard(self):
+    t = self._t(0)
+    t[2:6] = 99
+    self.assertListEqual(t.tolist(), [0,1,99,99,99,99,6,7,8,9,10,11,12,13,14,15])
 
   def test_setitem_full_slice(self):
     t = self._t(0)
