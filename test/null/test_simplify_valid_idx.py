@@ -103,6 +103,15 @@ class TestValidIdxSimplification(unittest.TestCase):
       valid = graph_rewrite(UOp.uprod(*clauses), sym)
       self.assertEqual(set(valid.split_uop(Ops.AND)), {r5<7, r3<1})
 
+  def test_uop_given_valid_tightens_bounds(self):
+    r = Range(0, 16)
+    self.assertIs(uop_given_valid((r < 4) & (r < 8), r // 4), UOp.const(0))
+    self.assertIs(uop_given_valid((r < 8) & (r < 4), r // 4), UOp.const(0))
+    self.assertIs(uop_given_valid((r >= 12) & (r >= 4), r // 12), UOp.const(1))
+    self.assertIs(uop_given_valid((r >= 4) & (r >= 12), r // 12), UOp.const(1))
+    self.assertIs(uop_given_valid(r < 100, r < 16), UOp.const(True))
+    self.assertIs(uop_given_valid(r >= -5, r >= 0), UOp.const(True))
+
   def test_simplify_valid_from_div(self):
     x = Variable("x", -100, 100)
     valid = ((x<0)&((100%x).cast(dtypes.bool)))
