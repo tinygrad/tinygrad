@@ -454,6 +454,14 @@ class TestDiskTensor(TempDirTestCase):
       t = Tensor.empty(8, 4, device=f"disk:{fn}", dtype=dtypes.uint8)[0:4].shard(("CPU:0", "CPU:1"), axis=0).realize()
       np.testing.assert_equal(t.to("CPU").numpy(), np.arange(16, dtype=np.uint8).reshape(4, 4))
 
+  def test_backward_through_disk(self):
+    fn = pathlib.Path(self.tmp("dt_backward_through_disk"))
+    fn.write_bytes(np.ones(4, dtype=np.float32).tobytes())
+    t = Tensor.empty(4, device=f"disk:{fn}", dtype=dtypes.float32)
+    w = t.to(Device.DEFAULT)
+    (w * 2).sum().backward()
+    np.testing.assert_equal(w.grad.numpy(), [2, 2, 2, 2])
+
   @slow
   def test_copy_from_disk_huge(self):
     fn = pathlib.Path(self.tmp("dt_copy_from_disk_huge"))
