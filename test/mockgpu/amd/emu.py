@@ -1941,8 +1941,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
         # complete the block for every participating wave before entering its successors, including barrier successors.
         end = emit_block(pc, end, scopes)
     return end
-
-  ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
+  ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name))
   ret = graph_rewrite(ret, pm_remove_native, name="remove native", enter_calls=True)
   return ret
 
