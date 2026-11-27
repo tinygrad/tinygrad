@@ -491,6 +491,14 @@ class TestFunctionTuple(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [1., 1., 1.])
     np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
 
+  def test_grad_fxn_invalid_store_into_seed(self):
+    # a grad_fxn may store Invalid into the part of its seed it drops, the enclosing backward still reads the rest
+    @function
+    @function(grad_fxn=lambda g, _: (g.after(g[:1].store(Invalid))[1:],))
+    def f(x:Tensor): return x.pad(((1, 0),))
+    x = Tensor([3.])
+    self.assertEqual(f(x).gradient(x, gradient=Tensor([7., 11.]))[0].tolist(), [11.])
+
   def test_grad_fxn_more_outputs_than_inputs(self):
     def grad_fxn(grad:UOp, call:UOp): return (grad,)
 

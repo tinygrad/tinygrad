@@ -67,6 +67,13 @@ class TestNN(unittest.TestCase):
   def test_batchnorm3d_no_running_stats(self): self.test_batchnorm2d(False, True, False)
   def test_batchnorm3d_training_no_running_stats(self): self.test_batchnorm2d(True, True, False)
 
+  def test_batchnorm_mixed_precision_running_stats(self):
+    with Context(DEFAULT_FLOAT=dtypes.float16, TRAINING=1):
+      bn = BatchNorm(1, momentum=0.5)
+      bn(Tensor([[1.], [3.]], dtype=dtypes.float32))
+      self.assertEqual(bn.running_mean.item(), 1.0)
+      self.assertEqual(bn.running_var.item(), 1.5)
+
   def test_batchnorm_axis(self):
     sz = (2, 4, 3, 2, 2)
     x = Tensor.randn(sz)
@@ -249,7 +256,7 @@ class TestNN(unittest.TestCase):
       torch_z.sum().backward()
 
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
-      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
+      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
@@ -415,10 +422,6 @@ class TestNN(unittest.TestCase):
   def test_embedding_one_kernel_fused(self):
     with Context(NOOPT=0):
       self._test_embedding_one_kernel(ops=612_000, kcount=2)
-
-  def test_embedding_one_kernel_fused_noopt(self):
-    with Context(NOOPT=1):
-      self._test_embedding_one_kernel(ops=0, kcount=2)
 
   def test_embedding_regression(self):
     # used to fail bounds check

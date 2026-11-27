@@ -2,7 +2,7 @@ import ast, pathlib, subprocess, sys, unittest
 from unittest.mock import patch
 
 import numpy as np
-from tinygrad import Device, Tensor, UOp, dtypes
+from tinygrad import Context, Device, Tensor, UOp, dtypes
 from tinygrad.helpers import DEV
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -83,9 +83,12 @@ class TestSlopKernelsUIR(unittest.TestCase):
     self.assertNotIn("stale garbage", sample.read_text(encoding="utf-8"))
     self.assertNotIn("\x1b", sample.read_text(encoding="utf-8"))
     self.assertIsNone(slopkernels.get("nonexistent_llm_kernel"))
+    all_uirs = slopkernels.generate_all()
     # Release mode: slopkernels absent, tinygrad/llm/kernels/<name>.uir present -> loaded & executable directly from disk.
+    has_amd = _amd_target() is not None
     llm_model._load_kernel.cache_clear()
     llm_model._get_kernel.cache_clear()
+    got_hc = None
     with patch.dict(sys.modules, {"slopkernels": None}):
       u_rel = llm_model._load_kernel("cdna_gemm_f16")
       self.assertIsNotNone(u_rel)
@@ -93,7 +96,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
       self.assertIs(u_rel.op, Ops.SINK)
       self.assertTrue(any(x.is_template for x in u_rel.toposort()))
       self.assertIsNone(llm_model._load_kernel("nonexistent_llm_kernel"))
-      if _amd_target() is not None:
+      if has_amd:
         dev = Tensor.empty(1).device
         rng = np.random.default_rng(7)
         mix = Tensor(rng.normal(0, 0.2, (2, 24)).astype(np.float32)).realize()
@@ -102,12 +105,12 @@ class TestSlopKernelsUIR(unittest.TestCase):
         scale = Tensor(rng.uniform(0.5, 1.5, (3,)).astype(np.float32)).realize()
         got_hc = llm_model._run_kernel("amd_hc_coeffs", (2, 24), dev, mix, flat, base, scale,
                                        tokens=2, features=128, iters=2, eps=1e-6, norm_eps=1e-6)
-        self.assertIsNotNone(got_hc)
-        assert got_hc is not None
-        np.testing.assert_allclose(got_hc.numpy()[:, 8:].reshape(2, 4, 4).sum(-1), 1.0, rtol=2e-2, atol=2e-2)
+    if has_amd:
+      self.assertIsNotNone(got_hc)
+      assert got_hc is not None
+      np.testing.assert_allclose(got_hc.numpy()[:, 8:].reshape(2, 4, 4).sum(-1), 1.0, rtol=2e-2, atol=2e-2)
     llm_model._load_kernel.cache_clear()
     llm_model._get_kernel.cache_clear()
-    all_uirs = slopkernels.generate_all()
     self.assertEqual(len(all_uirs), len(slopkernels._BUILDERS))
     self.assertEqual(len(list(uir_dir.glob("*.uir"))), len(all_uirs))
     self.assertLess(sum(len(v) for v in all_uirs.values()), 1_000_000)
@@ -155,11 +158,14 @@ class TestSlopKernelsUIR(unittest.TestCase):
       np.testing.assert_allclose(got_m[j], mw_ref_np[eid] @ x_m.numpy()[0], rtol=3e-2, atol=5e-2)
     # 4. Flash attention decode + prefill
     kv_fa = Tensor(rng.standard_normal((2, 1, 2, 128, 64)).astype(np.float16)).realize()
-    q_dec = Tensor(rng.standard_normal((1, 4, 1, 64)).astype(np.float16)).realize()
-    got_fd = _krun("amd_flash_decode", (1, 4, 1, 64), dev, q_dec, kv_fa, UOp.const(53),
-                   B=1, H_KV=2, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0).numpy()
-    ref_fd = q_dec.float().scaled_dot_product_attention(kv_fa[0, :, :, :53].float(), kv_fa[1, :, :, :53].float(), enable_gqa=True).numpy()
-    np.testing.assert_allclose(got_fd, ref_fd, rtol=5e-3, atol=5e-3)
+    for group in (2, 3, 5, 6, 7):
+      with self.subTest(group=group):
+        shape = (1, 2 * group, 1, 64)
+        q_dec = Tensor(rng.standard_normal(shape).astype(np.float16)).realize()
+        got_fd = _krun("amd_flash_decode", shape, dev, q_dec, kv_fa, UOp.const(53),
+                       B=1, H_KV=2, G=group, d_blks=1, n_blks=2, C=2, valid_kv_offset=0).numpy()
+        ref_fd = q_dec.float().scaled_dot_product_attention(kv_fa[0, :, :, :53].float(), kv_fa[1, :, :, :53].float(), enable_gqa=True).numpy()
+        np.testing.assert_allclose(got_fd, ref_fd, rtol=5e-3, atol=5e-3)
     if tgt[0] != 9:
       q_pre = Tensor(rng.standard_normal((1, 4, 32, 64)).astype(np.float16)).realize()
       got_fp = _krun(f"{arch_gemm}_flash_attn", (1, 4, 32, 64), dev, q_pre, kv_fa, UOp.const(64), UOp.const(32),
@@ -237,6 +243,113 @@ class TestSlopKernelsUIR(unittest.TestCase):
     ref_fs = q_fa.float().scaled_dot_product_attention(kv_fa[0, :, :, :41].float(), kv_fa[1, :, :, :41].float(), enable_gqa=True).numpy()
     np.testing.assert_allclose(got_fs, ref_fs, rtol=5e-3, atol=5e-3)
 
+  def test_regression_guards(self):
+    if (tgt := _amd_target()) is None: self.skipTest("AMD HIP renderer required")
+    from tinygrad.llm.model import Linear, TransformerBlock, TransformerConfig
+    from slopkernels.bench import _iq_lut, _make_packed, _packed_words
+    dev, rng = Tensor.empty(1).device, np.random.default_rng(19)
+    assert isinstance(dev, str)
+    def _knames(t:Tensor) -> list[str]:
+      with Context(ALLOW_DEVICE_USAGE=0): linear, _ = t.linear_with_externs()
+      return [c.src[0].arg.name if c.src[0].arg else "" for c in linear.src if c.src[0].op is Ops.SINK]
+    # 1. RDNA4 OTF FP8 IQ3_S GEMM accuracy across a 7.5x superblock scale jump (would clip >448 without sc_m scale)
+    if tgt[0] == 12:
+      m, n, k = 128, 2048, 512
+      qtype, w_len, w_dt, _ = _packed_words(n, k, "IQ3_S")
+      _, tile_u8 = _make_packed(n, k, "IQ3_S", dev)
+      raw_tile = tile_u8.numpy().reshape(tile_u8.shape[0], k // 256, 110).copy()
+      raw_tile[:, 0, :2], raw_tile[:, 0, 106:110] = np.frombuffer(np.float16(0.01).tobytes(), dtype=np.uint8), 0x00
+      raw_tile[:, 1, :2], raw_tile[:, 1, 106:110] = np.frombuffer(np.float16(0.075).tobytes(), dtype=np.uint8), 0xff
+      w_np = np.broadcast_to(raw_tile.reshape(tile_u8.shape)[None], (n // tile_u8.shape[0], *tile_u8.shape)).reshape(-1).copy()
+      w_u8, x, (lut, _) = Tensor(w_np, device=dev).realize(), Tensor(np.eye(m, k, k=256, dtype=np.float16), device=dev).realize(), _iq_lut(qtype, dev)
+      out = _krun("rdna4_gemm_f16", (m, n), dev, w_u8, x, lut,
+                  qtype=qtype, m_blks=m // 64, m_tiles=4, out_features=n, in_features=k, raw_bytes=w_len * w_dt.itemsize)[:, :4].numpy()
+      w4 = ggml_data_to_tensor(Tensor(raw_tile[:4].reshape(-1), device=dev), 4 * k, qtype).reshape(4, k).numpy()
+      np.testing.assert_allclose(out, w4[:, 256:384].T, rtol=8e-2, atol=1e-2)
+    # 2. Unused PARAM slots (sel/grid) must not emit extra E/copy kernels or require ALLOW_DEVICE_USAGE
+    w_u8, _, _ = _make_q8_0(rng, 64, 256)
+    qlin = Linear(256, 64, bias=False)
+    qlin.weight = ggml_data_to_tensor(w_u8, 64 * 256, 8).reshape(64, 256)
+    qx = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).realize()
+    self.assertEqual(_knames(qlin(qx)), ["linear_quant"])
+    # 3. Unrealized f32->f16 dense weight must fuse in pure tinygrad (no cast kernel), while realized f16 and GGUF bitcast f16 use linear_f16_gemv
+    w_f32 = Tensor(rng.standard_normal((48, 256)).astype(np.float32)).realize()
+    dlin_lazy, dlin_f16, dlin_gguf = Linear(256, 48, bias=False), Linear(256, 48, bias=False), Linear(256, 48, bias=False)
+    dlin_lazy.weight = w_f32.cast(dtypes.half)
+    dlin_f16.weight = w_f32.cast(dtypes.half).contiguous().realize()
+    w_raw_u8 = Tensor(w_f32.numpy().astype(np.float16).view(np.uint8).reshape(-1)).realize()
+    dlin_gguf.weight = w_raw_u8.bitcast(dtypes.half).reshape(48, 256)
+    self.assertEqual(len(_knames(dlin_lazy(qx).sigmoid())), 1)
+    self.assertEqual(_knames(dlin_f16(qx)), ["linear_f16_gemv"])
+    self.assertEqual(_knames(dlin_gguf(qx)), ["linear_f16_gemv"])
+    np.testing.assert_allclose(dlin_gguf(qx).numpy(), (qx @ dlin_f16.weight.float().T).numpy(), rtol=3e-3, atol=3e-3)
+    # 4. GQA group=6 (e.g. qwen3.8:27b H=24, H_KV=4) must dispatch amd_flash_decode
+    cfg = TransformerConfig(num_blocks=1, dim=256, hidden_dim=256, n_heads=24, n_kv_heads=4, norm_eps=1e-6, vocab_size=64,
+                            head_dim=64, rope_theta=10000.0, rope_dim=64, v_head_dim=64, max_context=128)
+    blk = TransformerBlock(cfg)
+    for p in (blk.attn_q.weight, blk.attn_k.weight, blk.attn_v.weight, blk.attn_output.weight): p.realize()
+    bx = Tensor(rng.standard_normal((1, 1, 256)).astype(np.float32)).realize()
+    blk._init_state(bx)
+    attn_names = _knames(blk._attention(bx, (UOp.variable("start_pos", 0, 127).bind(5),)))
+    self.assertIn("flash_decode_partial", attn_names)
+    self.assertIn("flash_decode_combine", attn_names)
+
+  def test_where_dispatch_branches(self):
+    """Exercise every Ops.WHERE branch in amd_gemv_f16_f32 and amd_gemv_quant_f32 and verify exactness."""
+    if (tgt := _amd_target()) is None: self.skipTest("AMD HIP renderer required")
+    dev, rng = Tensor.empty(1).device, np.random.default_rng(77)
+    assert isinstance(dev, str)
+    g0, sel0 = Tensor([0], dtype=dtypes.uint32).realize(), Tensor([0], dtype=dtypes.int32).realize()
+    # 1. amd_gemv_f16_f32: base (tok=1 inf%256!=0), fdot2_1t (wk=1, wk>1 wr=1, non-div4 outf, wr=4), lds_mt (tok=2 inf%1024==0 outf>=1024)
+    for tok, outf, inf in [(1, 64, 128), (1, 64, 256), (1, 63, 512), (1, 1024, 512), (1, 2048, 1024), (2, 1024, 1024)]:
+      w = Tensor(rng.standard_normal((outf, inf)).astype(np.float16)).realize()
+      x = Tensor(rng.standard_normal((tok, inf)).astype(np.float32)).realize()
+      vc = 4 if inf % 128 == 0 else 1
+      got = _krun("amd_gemv_f16_f32", (tok, outf), dev, w, x, tokens=tok, out_features=outf, in_blks=inf // (32 * vc), val_chunk=vc).numpy()
+      ref_d = x.numpy() @ w.numpy().astype(np.float32).T
+      np.testing.assert_allclose(got, ref_d, rtol=5e-3, atol=5e-3 * max(1.0, float(np.abs(ref_d).max())))
+    # 2. amd_gemv_quant_f32: sdot4 (tok=4), iq4_lds (tok=1, inf=2048 & 6144 & non-div4 outf), iq4 direct fallback (tok=2 & inf=256), moe_fp8 (arch=12)
+    if tgt[0] >= 11:
+      w8, _, w8_ref = _make_q8_0(rng, 64, 1024)
+      x4 = Tensor(rng.standard_normal((4, 1024)).astype(np.float32)).realize()
+      ref4 = (x4 @ w8_ref.T).numpy()
+      got4 = _krun("amd_gemv_quant_f32", (4, 64), dev, w8, x4, sel0, g0, qtype=8, tokens=4, x_rows=4, out_features=64,
+                   in_features=1024, raw_bytes=int(w8.numel()), group_rows=0, use_sel=0, x_share=1, ndev=1, arch=tgt[0], num_experts=0).numpy()
+      np.testing.assert_allclose(got4, ref4, rtol=4e-2, atol=3e-2 * np.abs(ref4).max())
+      for tok, outf, inf in [(1, 64, 2048), (1, 62, 2048), (1, 64, 6144), (1, 64, 8192), (2, 64, 2048), (1, 64, 256)]:
+        raw_np = rng.integers(0, 256, size=(outf * inf // 256, 136), dtype=np.uint8)
+        raw_np[:, :2] = np.array([0.01], dtype=np.float16).view(np.uint8)
+        raw_t = Tensor(raw_np.reshape(-1)).realize()
+        w_ref = ggml_data_to_tensor(raw_t, outf * inf, 23).reshape(outf, inf).realize()
+        xq = Tensor(rng.standard_normal((tok, inf)).astype(np.float32)).realize()
+        ref = (xq @ w_ref.T).numpy()
+        got = _krun("amd_gemv_quant_f32", (tok, outf), dev, raw_t, xq, sel0, g0, qtype=23, tokens=tok, x_rows=tok, out_features=outf,
+                    in_features=inf, raw_bytes=int(raw_t.numel()), group_rows=0, use_sel=0, x_share=1, ndev=1, arch=tgt[0], num_experts=0).numpy()
+        np.testing.assert_allclose(got, ref, rtol=3e-2, atol=2e-2 * np.abs(ref).max())
+    if tgt[0] == 12:
+      mw_u8, _, mw_ref = _make_q8_0(rng, 4 * 64, 256)
+      mw_np = mw_ref.numpy().reshape(4, 64, 256)
+      sel16 = Tensor(rng.integers(0, 4, size=(16,), dtype=np.int32)).realize()
+      xm16 = Tensor(rng.standard_normal((16, 256)).astype(np.float32)).realize()
+      got16 = _krun("amd_gemv_quant_f32", (16, 64), dev, mw_u8, xm16, sel16, g0, qtype=8, tokens=16, x_rows=16, out_features=64,
+                    in_features=256, raw_bytes=int(mw_u8.numel()), group_rows=0, use_sel=1, x_share=1, ndev=1, arch=12, num_experts=4).numpy()
+      ref16 = np.stack([mw_np[int(eid)] @ xm16.numpy()[i] for i, eid in enumerate(sel16.numpy())])
+      np.testing.assert_allclose(got16, ref16, rtol=6e-2, atol=5e-2 * np.abs(ref16).max())
+      # 3. rdna4_flash_attn qm=2 branch (M>=512, D<=128) & rdna4_gemm_f16 tok>=1024 FP8 branch (real GPU; too large for MockGPU emu)
+      if not DEV.interface.startswith("MOCK"):
+        kv_512 = Tensor(rng.standard_normal((2, 1, 2, 512, 64)).astype(np.float16)).realize()
+        q_512 = Tensor(rng.standard_normal((1, 4, 512, 64)).astype(np.float16)).realize()
+        got_qm2 = _krun("rdna4_flash_attn", (1, 4, 512, 64), dev, q_512, kv_512, UOp.const(512), UOp.const(512),
+                        B=1, H=4, H_KV=2, m_blks=16, d_blks=1, n_blks=16, valid_kv_offset=0, q_start_from_end=1).numpy()
+        mask_512 = Tensor.full((512, 512), float("-inf"), dtype=dtypes.float32).triu(1)
+        ref_qm2 = q_512.float().scaled_dot_product_attention(kv_512[0].float(), kv_512[1].float(), attn_mask=mask_512, enable_gqa=True).numpy()
+        np.testing.assert_allclose(got_qm2, ref_qm2, rtol=5e-3, atol=5e-3)
+        w8g, _, w8g_ref = _make_q8_0(rng, 2048, 512)
+        x1024 = Tensor(rng.standard_normal((1024, 512)).astype(np.float16)).realize()
+        got1024 = _krun("rdna4_gemm_f16", (1024, 2048), dev, w8g, x1024, g0, qtype=8,
+                        m_blks=16, m_tiles=4, out_features=2048, in_features=512, raw_bytes=int(w8g.numel())).numpy()
+        ref1024 = (x1024.float() @ w8g_ref.T).numpy()
+        np.testing.assert_allclose(got1024, ref1024, rtol=5e-2, atol=4e-2 * np.abs(ref1024).max())
 
 if __name__ == "__main__":
   unittest.main()

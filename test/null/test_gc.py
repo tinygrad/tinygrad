@@ -2,7 +2,7 @@
 import gc, weakref, contextlib
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, all_tensors
 from test.helpers import run_schedule
 
 def _allocations_of_type(t):
@@ -109,6 +109,7 @@ class TestGC(unittest.TestCase):
       holder = [a]
       holder.append(holder)
       del a, holder
+    self.assertTrue(all(r() is not None for r in all_tensors))
 
   def test_assign_keeps_buffer(self):
     a = Tensor.full((4,), 1.).contiguous()

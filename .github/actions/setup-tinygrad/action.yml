@@ -246,11 +246,11 @@ runs:
       if: inputs.cuda == 'true'
       shell: bash
       run: |
-        sudo mkdir -p /usr/local/cuda-12.4/targets/x86_64-linux
-        curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.4.127-archive.tar.xz \
-          | sudo tar -xJ -C /usr/local/cuda-12.4/targets/x86_64-linux --strip-components=1
-        sudo ln -sfnT /usr/local/cuda-12.4 /usr/local/cuda
-        echo /usr/local/cuda-12.4/targets/x86_64-linux/lib | sudo tee /etc/ld.so.conf.d/cuda-12.4.conf
+        sudo mkdir -p /usr/local/cuda-12.9/targets/x86_64-linux
+        curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.9.86-archive.tar.xz \
+          | sudo tar -xJ -C /usr/local/cuda-12.9/targets/x86_64-linux --strip-components=1
+        sudo ln -sfnT /usr/local/cuda-12.9 /usr/local/cuda
+        echo /usr/local/cuda-12.9/targets/x86_64-linux/lib | sudo tee /etc/ld.so.conf.d/cuda-12.9.conf
         sudo ldconfig
 
     # **** gpuocelot ****

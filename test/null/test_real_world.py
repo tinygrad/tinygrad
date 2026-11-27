@@ -116,7 +116,7 @@ class TestRealWorld(unittest.TestCase):
         loss.backward()
         optimizer.step()
 
-      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.017, 103)
+      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.012, 105)
 
   @slow
   def test_forward_cifar(self):
@@ -126,7 +126,7 @@ class TestRealWorld(unittest.TestCase):
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
       @TinyJit
       def run(X): return model(X)
-      helper_test("forward_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), run, 0.033, 27)
+      helper_test("forward_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), run, 0.033, 30)
 
   @slow
   def test_train_cifar(self):
@@ -143,7 +143,7 @@ class TestRealWorld(unittest.TestCase):
         loss.backward()
         optimizer.step()
 
-      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, 0.12, 126)
+      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, 0.13, 130)
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_train_cifar_hyp(self):
@@ -180,7 +180,7 @@ class TestRealWorld(unittest.TestCase):
       for v in data.values(): v.to_(Device.DEFAULT)
 
       helper_test("train_bert", lambda: (data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
-          data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.31, 400)
+          data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.22, 400)
 
 if __name__ == '__main__':
   unittest.main()

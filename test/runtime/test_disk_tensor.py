@@ -457,10 +457,11 @@ class TestDiskTensor(TempDirTestCase):
   @slow
   def test_copy_from_disk_huge(self):
     fn = pathlib.Path(self.tmp("dt_copy_from_disk_huge"))
-    fn.write_bytes(bytes(range(256))*1024*256)
+    size = (1 << 20) + 4096  # more than one io_uring read, even after slicing at an unaligned offset
+    fn.write_bytes(bytes(range(256)) * (size // 256))
 
     for off in [0, 551]:
-      t = Tensor.empty(256*1024*256, device=f"disk:{self.tmp('dt_copy_from_disk_huge')}", dtype=dtypes.uint8)[off:]
+      t = Tensor.empty(size, device=f"disk:{self.tmp('dt_copy_from_disk_huge')}", dtype=dtypes.uint8)[off:]
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
