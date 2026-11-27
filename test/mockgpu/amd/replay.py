@@ -45,8 +45,8 @@ def replay_asm(ast:UOp, code:bytes, arch:str, renderer:Renderer, dispatch:tuple,
     target = Target("AMD", "HIP", {"rdna3":"gfx1100", "rdna4":"gfx1200", "cdna":"gfx950"}[arch]) if backend == "amd" else \
       replace(Device["CPU"].renderer.target, renderer=backend.upper())
     ren = {"clang":ClangRenderer, "llvm":CPULLVMRenderer, "amd":HIPRenderer}[backend](target)
-    good_outs.append(get_output(to_program(ast, ren), ren, asm))
-    compare_outs.append(get_output(to_program(compare, ren), ren, asm))
+    good_outs.append(get_output(to_program(compare, ren), ren, asm))
+    compare_outs.append(get_output(to_program(ast, ren), ren, asm))
   return "\n".join(good_outs), "\n".join(compare_outs), (name, backends, dispatch)
 
 if __name__ == "__main__":
