@@ -2,7 +2,6 @@ import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, sum_acc_dtype
-from tinygrad.function import renumber_invalid_outputs
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
@@ -42,7 +41,6 @@ def call_gradient(grads:dict[UOp, UOp], k:UOp, needed:set[int]) -> tuple[UOp|Non
     bwd_body = bwd_body.substitute({st.src[1]:st.src[0] for st in outputs.values()}, walk=True)
     args = tuple(a.after(k) if i in outputs else a for i,a in enumerate(args))
   args += grad_args
-  bwd_body = renumber_invalid_outputs(bwd_body)
   # Compact this scope's PARAMs, capturing free Variables as inputs.
   used = sorted((p for p in bwd_body.toposort() if p.op is Ops.PARAM), key=lambda p:p.arg.slot)
   bwd_args = [p if p.arg.slot < 0 else args[p.arg.slot] for p in used]
