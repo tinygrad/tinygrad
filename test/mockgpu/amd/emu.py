@@ -1792,12 +1792,17 @@ def instruction_call(inst:Inst, arch:str) -> tuple[UOp, UOp|None]:
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({b for call in instructions for b in call.src[1:] if b.op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:UOp.param(i, b.dtype, b.shape, name=b.arg.name, addrspace=b.addrspace) for i,b in enumerate(bufs)}
-  curr:UOp|None = None
+  linear = list(UOp.sink(*params.values()).toposort())[:-1]
+  seen = set(linear)
   for call in instructions:
     args = [params.get(b, b) for b in call.src[1:]]
-    if curr is not None: args = [a.after(curr) for a in args]
-    curr = UOp.group(curr, call.replace(src=(call.body, *args)))
-  return UOp.sink(curr, arg=KernelInfo("emu_block", optimized=True)), bufs
+    inputs = UOp.sink(*args)
+    nodes = inputs.toposort(lambda u:u not in seen)
+    nodes.pop(inputs)
+    seen.update(nodes)
+    linear.extend(nodes)
+    linear.append(call.replace(src=(call.body, *args)))
+  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 # a block has an empty body; a loop contains its header block and the rest of its iteration.
 CFGRegion = tuple[int, list["CFGRegion"]]
