@@ -52,7 +52,7 @@ def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|
     kern = kern.substitute({b: b.replace(src=b.src[:1] + UOp.device_range_src(device), arg=replace(b.arg, device=device))
                             for b in kern.toposort() if b.op is Ops.ALLOC and b.arg.device is None})
   out, used = UOp.alloc(out_shape, dtypes.float32, device=device, axis=axis), {p.arg.slot for p in kern.toposort() if p.op is Ops.PARAM}
-  return Tensor(out.after(kern.call(out, *((a.uop if isinstance(a, Tensor) else a) if i in used else out for i, a in enumerate(args, 1)))))
+  return Tensor(out.after(kern.call(out, *(UOp.const(0) if i not in used else a.uop if isinstance(a, Tensor) else a for i, a in enumerate(args, 1)))))
 
 @functools.cache
 def _iq_lut(t:int, dev:str|tuple[str, ...]) -> UOp:
