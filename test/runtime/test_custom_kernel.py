@@ -4,8 +4,7 @@ from tinygrad.engine.realize import compile_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.codegen.rangeify import BufferizeOpts
-from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops, StageOpts
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer import TinyELF
@@ -264,7 +263,7 @@ class TestCustomKernel(unittest.TestCase):
     # the STAGE ends j, so the accumulator of the reduce over jj is initialized before the jj loop, not inside it
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j, jj = UOp.range(4, 0), UOp.range(8, 1), UOp.range(8, 2)
-      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
+      stage = (A[i, j] * 2).stage(j, arg=StageOpts(addrspace=AddrSpace.LOCAL))
       return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
@@ -274,7 +273,7 @@ class TestCustomKernel(unittest.TestCase):
     # the STAGE is inside the thread range i, so every thread stages its own row
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j, jj = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1), UOp.range(8, 2)
-      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
+      stage = (A[i, j] * 2).stage(j, arg=StageOpts(addrspace=AddrSpace.LOCAL))
       return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
@@ -284,7 +283,7 @@ class TestCustomKernel(unittest.TestCase):
     # the REG buffer of the STAGE and the accumulator of the reduce are different buffers
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j, jj = UOp.range(4, 0), UOp.range(8, 1), UOp.range(8, 2)
-      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.REG))
+      stage = (A[i, j] * 2).stage(j, arg=StageOpts(addrspace=AddrSpace.REG))
       return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
@@ -297,7 +296,7 @@ class TestCustomKernel(unittest.TestCase):
       def kernel(C:UOp, A:UOp) -> UOp:
         r, i = UOp.range(n, 1), UOp.range(n//2, 0)
         v = (A+1).pad((pad,)).index(r)
-        s = (v + (r%2).cast(dtypes.int) if split else v).bufferize(r, arg=BufferizeOpts(None, AddrSpace.REG))
+        s = (v + (r%2).cast(dtypes.int) if split else v).stage(r, arg=StageOpts(addrspace=AddrSpace.REG))
         return C[i].store(s[i] + s[i+n//2]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
       with self.subTest(split=split):
         self.assertEqual(Tensor.custom_kernel(Tensor.empty(n//2, dtype=dtypes.int), a, fxn=kernel)[0].tolist(), want)
@@ -315,13 +314,13 @@ class TestCustomKernel(unittest.TestCase):
   def test_explicit_stage_padded_slice(self):
     def kernel(out):
       r = UOp.range(2, 0)
-      return out.store(r.expand(2).pad((1, 1)).bufferize(r, arg=BufferizeOpts(Device.DEFAULT, removable=False))).sink()
+      return out.store(r.expand(2).pad((1, 1)).stage(r, arg=StageOpts(Device.DEFAULT))).sink()
     self.assertEqual(Tensor.empty(2, 4, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [[0, 0, 0, 0], [0, 1, 1, 0]])
 
   def _test_explicit_stage_free_range(self, space:AddrSpace):
     def kernel(out):
       i, j = UOp.range(3, 0), UOp.range(4, 1)
-      v = (i*10+j).cast(dtypes.int).bufferize(j, arg=BufferizeOpts(None, space, removable=False))
+      v = (i*10+j).cast(dtypes.int).stage(j, arg=StageOpts(addrspace=space))
       return out[i].store(v.index(2)).end(i).sink()
     self.assertEqual(Tensor.empty(3, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [2, 12, 22])
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
@@ -332,7 +331,7 @@ class TestCustomKernel(unittest.TestCase):
   def _test_explicit_stage_no_range(self, space:AddrSpace):
     def kernel(out):
       i = UOp.range(3, 0)
-      return out[i].store((i*10).cast(dtypes.int).bufferize(arg=BufferizeOpts(None, space, removable=False))+1).end(i).sink()
+      return out[i].store((i*10).cast(dtypes.int).stage(arg=StageOpts(addrspace=space))+1).end(i).sink()
     self.assertEqual(Tensor.empty(3, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [1, 11, 21])
   def test_explicit_stage_no_range_reg(self): self._test_explicit_stage_no_range(AddrSpace.REG)
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL STAGE needs shared memory")
@@ -342,7 +341,7 @@ class TestCustomKernel(unittest.TestCase):
     for direct, want in ((True, [2]), (False, [30])):
       def kernel(out, direct=direct):
         r = UOp.range(4, 0, dtype=dtypes.int32)
-        v = r.bufferize(r, arg=BufferizeOpts(Device.DEFAULT, removable=False)).index(2).load()
+        v = r.stage(r, arg=StageOpts(Device.DEFAULT)).index(2).load()
         values = UOp.stack(*[UOp.const(x, dtypes.int32) for x in (10, 20, 30, 40)])
         return out.index(0).store(v if direct else values.index(v)).sink()
       with self.subTest(direct=direct):

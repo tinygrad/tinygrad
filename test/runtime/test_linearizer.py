@@ -162,7 +162,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipIf(MOCKGPU and isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, CUDARenderer)), "PTX indexes differently. might be ok?")
   def test_where_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
-    b = a.shrink(((1, 2), None)).pad(((1, 2), None)).bool()
+    b = a.shrink(((1, 2), None)).pad(((1, 2), None)).bool().realize()
     a.assign(b.where(2, a))
     linear, externs = check_schedule(a, 1)
     run_schedule(linear, externs)

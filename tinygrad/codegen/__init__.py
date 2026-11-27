@@ -26,11 +26,10 @@ from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.codegen.multi import multi_pm
 from tinygrad.codegen.prepare import pm_mops, expand_bitcast, prepare_rangeify
-from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import indexing_simplify, memory_coalescing, pm_simplify_add_image
-from tinygrad.codegen.rangeify import BufferizeOpts, get_kernel_graph
+from tinygrad.codegen.rangeify import StageOpts, get_kernel_graph, _stack_select
 from tinygrad.codegen.memory import memory_plan_rewrite
 
 def do_number_param(ctx:tuple[int, dict[str, int]], x:UOp): # after the params, one slot per name
@@ -159,7 +158,7 @@ def fix_group_for_reduce(x:UOp):
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
   reduce_weak = [x.replace(arg=(AxisType.WEAK, x.axis_id[0]+100, *x.axis_id[1:])) for x in reduce_gfr]
-  buf = ret.bufferize(*reduce_gfr, arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*reduce_weak)
+  buf = ret.stage(*reduce_gfr, arg=StageOpts(addrspace=AddrSpace.LOCAL)).index(*reduce_weak)
 
   # do the final reduce (if/barrier are added in gpudims step)
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
@@ -658,7 +657,7 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
-def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, n:UOp, r:UOp|None=None):
+def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, n:UOp|None=None, r:UOp|None=None):
   if dst.device == src.device and not dst.on_disk(): return None
   return call.replace(src=(dst.store(src),) + call.src[1:])
 
@@ -675,7 +674,8 @@ def copy_pat(n:UPat, i:UPat) -> UPat:
 
 # a bulk STORE copies whole buffers, so lower only kernels that copy every i in range(n). a size 1 copy has its range folded to 0
 pm_copy_kernel = PatternMatcher([
-  (UPat(Ops.CALL, src=(copy_pat(UPat.cvar("n", arg=1), UPat.cvar(arg=0)).sink(),), name="call", allow_any_len=True), copy_kernel_to_store),
+  (UPat(Ops.CALL, src=(copy_pat(UPat.any(UPat.const(1), UPat(Ops.STACK, src=())), UPat.cvar(arg=0)).sink(),),
+        name="call", allow_any_len=True), copy_kernel_to_store),
   (UPat(Ops.CALL, src=(copy_pat(UPat.var("n"), UPat(Ops.RANGE, src=(UPat.var("n"),), name="r")).end(UPat(Ops.RANGE, name="r")).sink(),),
         name="call", allow_any_len=True), copy_kernel_to_store),
 ])

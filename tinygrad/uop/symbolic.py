@@ -104,6 +104,7 @@ pm_data_invalid = PatternMatcher([
    (a.logical_not()|cond).where(a.where(x,c), i) if not c.is_invalid else None),
   (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if not b.is_invalid else None),
   # fold gated LOAD/STORE
+  (UPat(Ops.STORE, src=(UPat(), invalid_pat), name="x"), lambda i,x: UOp(Ops.NOOP).after(*x.src)),
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat()), name="x"),
     lambda i,x: UOp(Ops.NOOP).after(*x.src)),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(),), allow_any_len=True, name="x"),
@@ -240,6 +241,12 @@ def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   nt, nf = t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)})
   return None if nt is t and nf is f else cond.where(nt, nf)
 
+def dead_end(e:UOp, a:UOp, n:UOp) -> UOp|None:
+  # An END can be removed if it solely ends unused ranges.  src[0] of the AFTER is a NOOP, so nothing is ordered relative to a RANGE in its src.
+  ended, deps = e.src[1:], a.src[1:]
+  if any(r in ended for s in deps for r in s.ranges if r is not s): return None
+  return n.after(*[s for s in deps if s.op is not Ops.RANGE])
+
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   # (!x|y)&x -> y&x
@@ -333,8 +340,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
     tuple(dedup(flatten([(y,) if y.op in GroupOp.Effect|{Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE, Ops.LOAD}
                         else (UOp(Ops.NOOP).after(y.src[0]).end(*y.src[1:]),) if y.op is Ops.REDUCE else y.src for y in x.src[1:]]))))),
+  (UPat(Ops.NOOP, name="n").after(name="a", allow_any_len=True).end(name="e", allow_any_len=True), dead_end),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
+  (UPat(Ops.NOOP, name="n").end(allow_any_len=True), lambda n: n),
   # the rules above key on bare CONSTs, so a redundantly committed const has to be uncast in the same fixpoint
 ])+div_and_mod_symbolic+pm_uncast_const
 
@@ -473,8 +482,6 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate)), alt)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.load(UPat(Ops.INDEX, name="index")), UPat.var("alt"))),
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate.logical_not())), alt)),
-  # fold gated LOAD/STORE
-  (UPat(Ops.STORE, src=(UPat(), invalid_pat), name="x"), lambda i,x: UOp(Ops.NOOP).after(*x.src)),
   # store of where with invalid -> gated store
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="index"), UPat.var("cond").where(UPat.var("val"), invalid_pat))),
    lambda index, cond, val, i: UOp.store(index.src[0].index(index.src[1].valid(cond)), val)),
