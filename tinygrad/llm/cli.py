@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, json, time
+import sys, argparse, json, time, re
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -101,6 +101,8 @@ def main():
   if not args.no_chat_template and (ct := tok.chat_template) is not None:
     try:
       import jinja2
+      # {% generation %} only marks training spans, keep it as a plain block
+      ct = re.sub(r"(\{%-?\s*)(end)?generation\b", lambda m: m[1] + ("endif" if m[2] else "if true"), ct)
       env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True, extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
       env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))

@@ -1,10 +1,10 @@
-import unittest
+import unittest, math
 import numpy as np
 from tinygrad import Tensor, dtypes, nn, UOp, TinyJit
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
   HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig, Compressor,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv, RelAttnConfig, RelAttentionBlock, sink_attention,
 )
 from tinygrad.llm.gguf import GGUFPackedTable
 from test.helpers import slow
@@ -72,6 +72,12 @@ class TestAttention(unittest.TestCase):
     self.assertTrue(attention(False).allclose(x, rtol=0, atol=1e-6).item())
     # the token and zero-value sink have equal weights: ([2,4] + [0,0]) / 2
     self.assertTrue(attention(True).allclose(x / 2, rtol=0, atol=1e-6).item())
+
+  def test_sink_attention_mask(self):
+    # q is zero, so the weights are exp(mask) and exp(sink) per row, the sink has a zero value: 2/(1+1), (2 + 4*2)/(1+2+5)
+    mask, sink = Tensor([[[[0., -math.inf], [0., math.log(2)]]]]), Tensor([[[[0.], [math.log(5)]]]])
+    out = sink_attention(Tensor.zeros(1, 1, 2, 1), Tensor.zeros(1, 1, 2, 1), Tensor([[[[2.], [4.]]]]), mask, sink)
+    np.testing.assert_allclose(out.numpy().flatten(), [1., 1.25], rtol=1e-6)
 
   def test_sliding_window(self):
     x = Tensor([[[1., 1.], [3., 3.], [5., 5.]]])
@@ -246,6 +252,14 @@ class TestAttention(unittest.TestCase):
     for start_pos in (0, 2): ple.write_rows([3, 7, 5, 9], start_pos, 2, 2)
     # (t0 ^ 2*t1) % 13, (t0 ^ 2*t1 ^ 4*t2) % 17 + 13
     np.testing.assert_array_equal(ple.table.rows.numpy()[:4], table[[[0, 13], [1, 25], [11, 19], [3, 27]]])
+
+  def test_rel_conv_taps(self):
+    # each head adds its taps to the conv weight, out = (x + conv) / sqrt(5)
+    ra = RelAttnConfig(length=4, extent=8, qk_clip=5.0, rel_clip=5.0, log_scale_floor=2, log_scale_alpha=0.5, conv_kernel=2)
+    block, conv = RelAttentionBlock(self._make_config(n_kv_heads=2, rel_attn=ra)), {"weight": Tensor([[1., 0.], [0., 1.], [1., 1.], [0., 0.]])}
+    block.conv_states, block.initial = {conv["weight"]: Tensor([[[1., 2., 3., 4.]]]).contiguous().realize()}, Tensor(False)
+    out = block._conv(conv, Tensor([[[1., 0., 2., 1.], [0., 3., 1., 2.]]]), Tensor([[[1., 0., 0., 2.], [0., 3., 1., 0.]]]))
+    np.testing.assert_allclose((out * 5 ** 0.5).numpy(), [[[3., 0., 13., 9.], [4., 6., 5., 4.]]], rtol=1e-6)
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
