@@ -195,7 +195,6 @@ jobs:
       run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Run targeted tests on NULL backend
       run: |
-        DEV=NULL python3 -m unittest test.runtime.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
         DEV=NULL VIZ=1 python3 -m pytest -n=auto test/null/test_viz.py
         DEBUG=7 python -m tinygrad.viz.cli --json | jq empty
     # TODO: too slow

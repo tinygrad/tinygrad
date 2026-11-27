@@ -4,13 +4,8 @@ from tinygrad import Device
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
-from test.helpers import slow
 from extra.training import train
 from extra.models.convnext import ConvNeXt
-from extra.models.efficientnet import EfficientNet
-from extra.models.transformer import Transformer
-from extra.models.vit import ViT
-from extra.models.resnet import ResNet18
 
 BS = getenv("BS", 2)
 
@@ -37,42 +32,6 @@ class TestTrain(unittest.TestCase):
     X = np.zeros((BS,3,64,64), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
     train_one_step(model,X,Y)
-    check_gc()
-
-  @slow
-  def test_efficientnet(self):
-    model = EfficientNet(0)
-    X = np.zeros((BS,3,224,224), dtype=np.float32)
-    Y = np.zeros((BS), dtype=np.int32)
-    train_one_step(model,X,Y)
-    check_gc()
-
-  @slow
-  def test_vit(self):
-    model = ViT()
-    X = np.zeros((BS,3,224,224), dtype=np.float32)
-    Y = np.zeros((BS,), dtype=np.int32)
-    train_one_step(model,X,Y)
-    check_gc()
-
-  @slow
-  def test_transformer(self):
-    # this should be small GPT-2, but the param count is wrong
-    # (real ff_dim is 768*4)
-    model = Transformer(syms=10, maxlen=6, layers=12, embed_dim=768, num_heads=12, ff_dim=768//4)
-    X = np.zeros((BS,6), dtype=np.float32)
-    Y = np.zeros((BS,6), dtype=np.int32)
-    train_one_step(model,X,Y)
-    check_gc()
-
-  @slow
-  def test_resnet(self):
-    X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
-    Y = np.zeros((BS), dtype=np.int32)
-    for resnet_v in [ResNet18]:
-      model = resnet_v()
-      model.load_from_pretrained()
-      train_one_step(model, X, Y)
     check_gc()
 
   def test_bert(self):

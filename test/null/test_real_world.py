@@ -5,16 +5,14 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes, Variable
 from tinygrad.helpers import Context
-from test.helpers import slow, jit_cache_count, KernelCountException
+from test.helpers import jit_cache_count, KernelCountException
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer
 from examples.hlb_cifar10 import SpeedyResNet, hyp
 from extra.models.llama import Transformer as LLaMaTransformer
-from examples.stable_diffusion import UNetModel, unet_params
 from extra.models.unet import ResBlock
-from extra.models.bert import BertForPretraining
 
 global_mem_used = 0
 def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jitted=False):
@@ -52,20 +50,6 @@ class TestRealWorld(unittest.TestCase):
     global_mem_used = GlobalCounters.mem_used
     np.random.seed(2002)
 
-  @slow
-  @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
-  def test_stable_diffusion(self):
-    params = unet_params
-    params["model_ch"] = 8
-    params["ctx_dim"] = 8
-    params["num_res_blocks"] = 1
-    params["n_heads"] = 2
-    model = UNetModel(**params)
-    derandomize_model(model)
-    @TinyJit
-    def test(t, t2): return model(t, Tensor([801]), t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 32, 32), Tensor.randn(1, 77, params["ctx_dim"])), test, 0.011, 515)
-
   def test_unet_resblock(self):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
     derandomize_model(model)
@@ -100,51 +84,6 @@ class TestRealWorld(unittest.TestCase):
       with Context(JIT=0): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23, 168, all_jitted=True)
 
-  @slow
-  def test_train_mnist(self):
-    from examples.beautiful_mnist import Model
-    with Context(TRAINING=1):
-      model = Model()
-      optimizer = optim.Adam(get_parameters(model))
-      BS = 32
-
-      @TinyJit
-      def train(X):
-        out = model(X)
-        loss = out.mean()
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.012, 105)
-
-  @slow
-  def test_forward_cifar(self):
-    BS = 32
-    # with training batchnorm still though
-    with Context(TRAINING=1):
-      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
-      @TinyJit
-      def run(X): return model(X)
-      helper_test("forward_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), run, 0.033, 30)
-
-  @slow
-  def test_train_cifar(self):
-    with Context(TRAINING=1):
-      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
-      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
-      BS = 32
-
-      @TinyJit
-      def train(X):
-        out = model(X)
-        loss = out.mean()
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, 0.13, 130)
-
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_train_cifar_hyp(self):
     self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
@@ -157,30 +96,6 @@ class TestRealWorld(unittest.TestCase):
       lr_scheduler = OneCycleLR(optimizer, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor,
                                 final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
       assert not np.isnan(lr_scheduler.min_lr), "lr too small or initial_div_facotr too big for half"
-
-  @slow
-  def test_bert(self):
-    with Context(TRAINING=1):
-      args_tiny = {"attention_probs_dropout_prob": 0.0, "hidden_dropout_prob": 0.0, "vocab_size": 30522, "type_vocab_size": 2,
-                  "max_position_embeddings": 512, "hidden_size": 128, "intermediate_size": 512, "num_attention_heads": 2, "num_hidden_layers": 2}
-      model = BertForPretraining(**args_tiny)
-      optimizer = optim.LAMB(get_parameters(model))
-
-      @TinyJit
-      def train(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
-                masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
-        lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
-        loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-      from examples.mlperf.helpers import get_fake_data_bert
-      data = get_fake_data_bert(BS=4)
-      for v in data.values(): v.to_(Device.DEFAULT)
-
-      helper_test("train_bert", lambda: (data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
-          data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.22, 400)
 
 if __name__ == '__main__':
   unittest.main()

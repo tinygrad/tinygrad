@@ -4,7 +4,6 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType, DTYPES_DICT
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, OSX, dedup, Context
-from test.helpers import slow
 
 class TempDirTestCase(unittest.TestCase):
   def setUp(self):
@@ -462,11 +461,10 @@ class TestDiskTensor(TempDirTestCase):
     (w * 2).sum().backward()
     np.testing.assert_equal(w.grad.numpy(), [2, 2, 2, 2])
 
-  @slow
   def test_copy_from_disk_huge(self):
     fn = pathlib.Path(self.tmp("dt_copy_from_disk_huge"))
     size = (1 << 20) + 4096  # more than one io_uring read, even after slicing at an unaligned offset
-    fn.write_bytes(bytes(range(256)) * (size // 256))
+    fn.write_bytes(np.random.bytes(size))
 
     for off in [0, 551]:
       t = Tensor.empty(size, device=f"disk:{self.tmp('dt_copy_from_disk_huge')}", dtype=dtypes.uint8)[off:]

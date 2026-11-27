@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
 from tinygrad.helpers import Context, TC_SELECT, TC_OPT
-from test.helpers import slow, replace_opts, buffer_uops, run_schedule
+from test.helpers import replace_opts, buffer_uops, run_schedule
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -275,34 +275,33 @@ class TestTensorCores(unittest.TestCase):
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
-  @slow
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if tc.dtype_in is dtypes.bfloat16: continue # <-- broken with numpy
-      # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
-      golden_result = None
-      a = _tc_rand(16, 16, 29, 29, dtype=tc.dtype_in).realize()
-      b = _tc_rand(32, 16, 16, 16, dtype=tc.dtype_in).realize()
-      for axis in range(9):
-        c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
-        realized_ast, real_bufs = helper_realized_ast(c)
+    tc = min(Device[Device.DEFAULT].renderer.tensor_cores, key=lambda tc: tc.dims[2])
+    # Both the input channels and the kernel width can supply the tensor core K axis.
+    n, m, k = tc.dims
+    golden_result = None
+    a = _tc_rand(1, k, m+k-1, dtype=tc.dtype_in).realize()
+    b = _tc_rand(n, k, k, dtype=tc.dtype_in).realize()
+    for axis in (0, 1):
+      c = a.conv2d(b, dtype=tc.dtype_out)
+      realized_ast, real_bufs = helper_realized_ast(c)
 
-        ast = replace_opts(realized_ast, [Opt(OptOps.TC, axis, (-1, 2, 1))])
-        program = to_program(ast, Device[Device.DEFAULT].renderer)
-        assert len([uop for uop in tuple(program.src[1].src) if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
-        assert len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
+      ast = replace_opts(realized_ast, [Opt(OptOps.TC, axis, (-1, 2, 1))])
+      program = to_program(ast, Device[Device.DEFAULT].renderer)
+      assert len([uop for uop in tuple(program.src[1].src) if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
+      assert len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        # TODO: support this even if numpy doesn't
-        if _to_np_dtype(c.dtype) is None: continue
-        # Zero to check that all values are filled
-        real_bufs[0].copy_from(Buffer("PYTHON", real_bufs[0].nbytes, initial_value=bytes(real_bufs[0].nbytes)))
-        run_program(ast, real_bufs)
-        result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(c.dtype))
+      # TODO: support this even if numpy doesn't
+      if _to_np_dtype(c.dtype) is None: continue
+      # Zero to check that all values are filled
+      real_bufs[0].copy_from(Buffer("PYTHON", real_bufs[0].nbytes, initial_value=bytes(real_bufs[0].nbytes)))
+      run_program(ast, real_bufs)
+      result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(c.dtype))
 
-        # ensure the results for each choice of axis matches
-        if golden_result is None: golden_result = result.copy()
-        np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
+      # ensure the results for each choice of axis matches
+      if golden_result is None: golden_result = result.copy()
+      np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")

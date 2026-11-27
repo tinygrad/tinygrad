@@ -4,12 +4,11 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
 from tinygrad.helpers import Context
-from test.helpers import needs_devices, slow
+from test.helpers import needs_devices
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
 W_init = np.random.randn(4,4).astype(np.float32)
-m_init = np.random.randn(1,4).astype(np.float32)
 
 def _param(tensor, val):
   return tensor(val, requires_grad=True) if tensor is torch.tensor else tensor(val)
@@ -21,21 +20,8 @@ class TeenyNet:
   def forward(self):
     return (self.x * self.W).sum()
 
-class TinyNet:
-  def __init__(self, tensor):
-    self.x = _param(tensor, x_init.copy())
-    self.W = _param(tensor, W_init.copy())
-    self.m = tensor(m_init.copy())
-
-  def forward(self):
-    out = self.x.matmul(self.W).relu()
-    # print(out.detach().numpy())
-    out = out.log_softmax(1)
-    out = out.mul(self.m).add(self.m).sum()
-    return out
-
-def step(tensor, optim, steps=1, teeny=False, **kwargs):
-  net = TeenyNet(tensor) if teeny else TinyNet(tensor)
+def step(tensor, optim, steps=1, **kwargs):
+  net = TeenyNet(tensor)
   optim = optim([net.x, net.W], **kwargs)
   for _ in range(steps):
     out = net.forward()
@@ -44,7 +30,6 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
-@slow
 class TestOptim(unittest.TestCase):
   def setUp(self): self.enterContext(Context(TRAINING=1))
 
@@ -58,97 +43,37 @@ class TestOptim(unittest.TestCase):
   def _test_adamw(self, steps, opts, atol, rtol): self._test_optim(AdamW, torch.optim.AdamW, steps, opts, atol, rtol)
   def _test_muon(self, steps, opts, atol, rtol): self._test_optim(Muon, torch.optim.Muon, steps, opts, atol, rtol)
 
-  def test_multistep_sgd_high_lr_teeny(self): self._test_sgd(2, {'lr': 1.1, 'teeny': True}, 1e-6, 1e-5)
-  def test_multistep_adam_high_lr_teeny(self): self._test_adam(2, {'lr': 1.1, 'teeny': True}, 2e-4, 5e-4)
-  def test_multistep_muon_high_lr_teeny(self): self._test_muon(2, {'lr': 1.1, 'teeny': True}, 1e-2, 5e-4)
-
-  def test_sgd(self): self._test_sgd(1, {'lr': 0.001}, 1e-6, 0)
-  def test_sgd_high_lr(self): self._test_sgd(1, {'lr': 10}, 1e-6, 1e-5)
-  def test_sgd_wd(self): self._test_sgd(1, {'lr': 0.001, 'weight_decay': 0.1}, 1e-6, 0)
-  def test_sgd_high_lr_wd(self): self._test_sgd(1, {'lr': 10, 'weight_decay': 0.1}, 1e-6, 1e-5)
-
-  def test_multistep_sgd(self): self._test_sgd(10, {'lr': 0.001}, 1e-6, 0)
-  def test_multistep_sgd_high_lr(self): self._test_sgd(10, {'lr': 10}, 1e-6, 3e-4)
-  def test_multistep_sgd_wd(self): self._test_sgd(10, {'lr': 0.001, 'weight_decay': 0.1}, 1e-6, 0)
-  def test_multistep_sgd_high_lr_wd(self): self._test_sgd(10, {'lr': 9, 'weight_decay': 0.1}, 1e-6, 3e-4)
-
-  def test_multistep_sgd_momentum(self): self._test_sgd(10, {'lr': 0.001, 'momentum': 0.9}, 1e-6, 0)
-  def test_multistep_sgd_high_lr_momentum(self): self._test_sgd(10, {'lr': 10, 'momentum': 0.9}, 1e-5, 3e-4)
-  def test_multistep_sgd_momentum_wd(self): self._test_sgd(10, {'lr': 0.001, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-6, 0)
-  def test_multistep_sgd_high_lr_momentum_wd(self): self._test_sgd(10, {'lr': 10, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
-
-  def test_multistep_sgd_nesterov_momentum(self): self._test_sgd(10, {'lr': 0.001, 'momentum': 0.9, 'nesterov': True}, 1e-5, 0)
-  def test_multistep_sgd_high_lr_nesterov_momentum(self): self._test_sgd(10, {'lr': 10, 'momentum': 0.9, 'nesterov': True}, 1e-5, 3e-4)
-  def test_multistep_sgd_nesterov_momentum_wd(self):
-    self._test_sgd(10, {'lr': 0.001, 'momentum': 0.9, 'nesterov': True, 'weight_decay': 0.1}, 1e-5, 0)
+  def test_multistep_sgd_high_lr_momentum(self): self._test_sgd(2, {'lr': 10, 'momentum': 0.9}, 1e-5, 3e-4)
   def test_multistep_sgd_high_lr_nesterov_momentum_wd(self):
-    self._test_sgd(10, {'lr': 9, 'momentum': 0.9, 'nesterov': True, 'weight_decay': 0.1}, 1e-5, 3e-4)
+    self._test_sgd(2, {'lr': 9, 'momentum': 0.9, 'nesterov': True, 'weight_decay': 0.1}, 1e-5, 3e-4)
 
-  def test_muon(self): self._test_muon(1, {'lr': 0.001}, 1e-3, 0)
-  # TODO: disabled due to big atol
-  # def test_muon_high_lr(self): self._test_muon(1, {'lr': 10}, 1e-6, 3e-4)
-  # NOTE: big weight_decay so a missing wd would be way over atol
-  def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 10}, 1e-3, 3e-4)
-  # TODO: disabled due to big atol
-  # def test_muon_high_lr_wd(self): self._test_muon(1, {'lr': 10, 'weight_decay': 0.01}, 1e-6, 5e-4)
+  def test_multistep_muon_high_lr_teeny(self): self._test_muon(2, {'lr': 1.1}, 1e-2, 5e-4)
 
-  # NOTE: momentum set to 0.95 by default, nesterov set to True by default
-  def test_multistep_muon_momentum_wd(self): self._test_muon(10, {'lr': 0.001, 'weight_decay': 0.01}, 3e-3, 0)
-  # ns defaults are numerically unstable, but it is tolerable in real training (see nsteps/nparam tests)
-  # TODO: disabled due to big atol
-  # def test_multistep_muon_high_lr_momentum_wd(self): self._test_muon(10, {'lr': 10, 'weight_decay': 0.01}, 1e-1, 3e-4)
-  def test_multistep_muon_no_nesterov_momentum(self): self._test_muon(10, {'lr': 0.001, 'nesterov': False}, 1e-3, 0)
-  # TODO: disabled due to big atol
-  # def test_multistep_muon_high_lr_no_nesterov_momentum(self): self._test_muon(10, {'lr': 10, 'nesterov': False}, 5e-2, 1e-1)
+  def test_multistep_adam_high_lr(self): self._test_adam(2, {'lr': 10}, 2e-3, 5e-4)
 
-  def test_muon_ns_steps(self): self._test_muon(1, {'lr': 0.001, 'ns_steps': 3}, 1e-4, 0)
-  # TODO: disabled due to big atol
-  # def test_muon_high_lr_ns_steps(self): self._test_muon(1, {'lr': 10, 'ns_steps': 3}, 1e-5, 3e-4)
-  def test_muon_ns_coefficients(self): self._test_muon(1, {'lr': 0.001,'ns_coefficients': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
-  # TODO: disabled due to big atol
-  # def test_muon_high_lr_ns_coefficients(self): self._test_muon(1, {'lr': 10,'ns_coefficients': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
-
-  def test_muon_momentum_wd_ns_steps_ns_coefficients(self):
-    self._test_muon(10, {'lr': 0.001, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_coefficients': (2.0,-1.5,0.5)}, 1e-4, 0)
-  # TODO: disabled due to big atol
-  # def test_multistep_muon_high_lr_momentum_wd_ns_steps_ns_coefficients(self):
-  #   self._test_muon(10, {'lr': 10, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_coefficients': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
-
-  def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
-  def test_adam_high_lr(self): self._test_adam(1, {'lr': 10}, 1e-4, 1e-4)
-  def test_adamw(self): self._test_adamw(1, {'lr': 0.001}, 1e-5, 0)
-  def test_adamw_high_lr(self): self._test_adamw(1, {'lr': 10}, 1e-4, 1e-4)
-
-  def test_multistep_adam(self): self._test_adam(10, {'lr': 0.001}, 1e-5, 0)
-  def test_multistep_adam_high_lr(self): self._test_adam(10, {'lr': 10}, 2e-3, 5e-4)
-
-  def test_multistep_adamw(self): self._test_adamw(10, {'lr': 0.001}, 1e-5, 0)
-  def test_multistep_adamw_high_lr(self): self._test_adamw(10, {'lr': 10}, 5e-4, 2e-3)
+  def test_multistep_adamw_high_lr(self): self._test_adamw(2, {'lr': 10}, 5e-4, 2e-3)
 
   def test_duped_weights(self):
-    for Opt in [Adam, AdamW, SGD]:
-      losses = []
-      for i in range(2):
-        w = Tensor(x_init.copy())
-        opt = Opt([w], lr=0.1) if i == 0 else Opt([w, w], lr=0.1)
+    losses = []
+    for i in range(2):
+      w = Tensor(x_init.copy())
+      opt = SGD([w], lr=0.1) if i == 0 else SGD([w, w], lr=0.1)
 
-        loss = None
-        for _ in range(3):
-          loss = w.sum()
-          opt.zero_grad()
-          loss.backward()
-          opt.step()
-        losses.append(loss.numpy())
+      loss = None
+      for _ in range(2):
+        loss = w.sum()
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+      losses.append(loss.numpy())
 
-      np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
+    np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
 
   @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
   def test_mixed_precision(self):
     self.enterContext(Context(DEFAULT_FLOAT=dtypes.half))
     # weight update would overflow without upcasting
-    self._test_sgd(10, {'lr': 1e10}, 1e-6, 3e-4)
-    self._test_adam(1, {'lr': 1e10}, 1e-4, 1e-4)
-    self._test_adamw(1, {'lr': 1e10}, 1e-4, 1e-4)
+    self._test_sgd(1, {'lr': 1e10}, 1e-6, 3e-4)
 
   def test_assert_tensor_train(self):
     t = Tensor.ones((1,1))

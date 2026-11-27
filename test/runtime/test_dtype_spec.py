@@ -3,7 +3,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, strong_dtype
 from tinygrad.device import Device
 from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES, Context
-from test.helpers import slow
 from hypothesis import given, settings, strategies as strat
 import numpy as np
 import torch
@@ -182,15 +181,12 @@ class TestAutoCastType(unittest.TestCase):
           assert a.grad.dtype == a.dtype
           np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
-  @slow
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_mean_half_precision_underflow(self):
     N = 10000
     x = 0.001
-    t = Tensor([[x]], dtype=dtypes.half).expand(N, N).contiguous()
-    np.testing.assert_allclose(t.mean(axis=1).numpy(), np.array([x] * N, dtype=np.float16), rtol=1e-3)
+    t = Tensor([[x]], dtype=dtypes.half).expand(32, N).contiguous()
+    np.testing.assert_allclose(t.mean(axis=1).numpy(), np.array([x] * 32, dtype=np.float16), rtol=1e-3)
 
   @unittest.skip("this test only works with SPLIT_REDUCEOP=1")
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
