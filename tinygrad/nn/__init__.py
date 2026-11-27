@@ -53,8 +53,9 @@ class BatchNorm:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
     if self.track_running_stats and TRAINING:
-      self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-      self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach())
+      self.running_mean.assign(((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach()).cast(self.running_mean.dtype))
+      self.running_var.assign(((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach())
+                              .cast(self.running_var.dtype))
       self.num_batches_tracked += 1
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
