@@ -1771,7 +1771,7 @@ def lower_body(sink:UOp) -> UOp:
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|None]:
-  entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
+  entries = instruction_cache.setdefault((arch, type(inst), inst.size()), [])
   inst_bytes = inst.to_bytes()
   bits = int.from_bytes(inst_bytes, "little")
   for base, mask, ret in entries:
