@@ -55,7 +55,6 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.codegen import to_program, to_program_config
-from tinygrad.renderer import Renderer
 from tinygrad.helpers import Context, DEV, to_mv, ContextVar
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, get_elf_section
