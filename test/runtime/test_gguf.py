@@ -152,6 +152,7 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_iq4_xs(self): self._test_dequantization(GGMLQuantizationType.IQ4_XS)
   def test_dequantization_iq1_m(self): self._test_dequantization(GGMLQuantizationType.IQ1_M)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
+  def test_dequantization_nvfp4(self): self._test_dequantization(GGMLQuantizationType.NVFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
   def test_dequantization_mxfp4_old(self):
@@ -249,6 +250,36 @@ class TestGGUF(unittest.TestCase):
           loaded_kv, decoded = gguf_load(source)
           self.assertEqual(loaded_kv, kv)
           for name, value in expected.items(): np.testing.assert_equal(decoded[name].numpy(), value)
+
+  def test_load_weight_scale(self):
+    from gguf import GGUFWriter
+    from tinygrad.helpers import get_child
+    from tinygrad.llm.model import Transformer
+    block = {'attn_norm': (8,), 'attn_q': (8, 8), 'attn_k': (8, 8), 'attn_v': (8, 8), 'attn_output': (8, 8), 'ffn_norm': (8,),
+             'ffn_gate_inp': (4, 8), 'ffn_gate_exps': (4, 8, 8), 'ffn_up_exps': (4, 8, 8), 'ffn_down_exps': (4, 8, 8)}
+    shapes = {'token_embd.weight': (32, 8), 'output_norm.weight': (8,), **{f'blk.0.{k}.weight': s for k, s in block.items()}}
+    rng = np.random.default_rng(0)
+    weights = {k:rng.normal(size=s).astype(np.float32) for k,s in shapes.items()}
+    scales = {f'blk.0.ffn_{p}_exps.scale': np.array([1, 2, 3, 4], np.float32) * (i+1) * 1e-6 for i, p in enumerate(('gate', 'up', 'down'))}
+    scales['blk.0.attn_output.scale'] = np.array([5e-6], np.float32)
+    with tempfile.TemporaryDirectory() as folder:
+      writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
+      for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':1, 'expert_count':4,
+                        'expert_used_count':2, 'attention.head_count':4, 'attention.head_count_kv':4, 'attention.key_length':2,
+                        'rope.dimension_count':2}.items():
+        writer.add_uint32('deepseek2.'+key, value)
+      writer.add_float32('deepseek2.rope.freq_base', 10000)
+      writer.add_float32('deepseek2.attention.layer_norm_rms_epsilon', 1e-5)
+      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(32)])
+      for name,value in {**weights, **scales}.items(): writer.add_tensor(name, value)
+      writer.write_header_to_file()
+      writer.write_kv_data_to_file()
+      writer.write_tensors_to_file()
+      writer.close()
+      with Context(DEV="CPU"):
+        model = Transformer.from_gguf(path)[0]
+        for k, v in scales.items(): np.testing.assert_equal(get_child(model, k.removesuffix('.scale')).scale.numpy(), v)
+        self.assertIsNone(model.blk[0].attn_q.scale)
 
   def test_parse_empty(self):
     blob = self._build_gguf([], [("general.name", "empty")])

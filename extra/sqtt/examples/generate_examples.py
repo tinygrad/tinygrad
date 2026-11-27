@@ -11,6 +11,7 @@ EXAMPLES = {
   "gemm":"-c \"from tinygrad import Tensor; (Tensor.empty(N:=32, N)@Tensor.empty(N, N)).realize()\"",
   "sync":"test/amd/test_asm_kernel.py TestAsmKernel.test_lds_sync",
   "handwritten":"test/amd/test_asm_kernel.py TestAsmKernel.test_handwritten",
+  "call":"test/amd/test_asm_kernel.py TestAsmKernel.test_call",
 }
 
 if __name__ == "__main__":

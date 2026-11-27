@@ -25,7 +25,7 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                10:(256,84), 11:(256,110), 12:(256,144), 13:(256,176), 14:(256,210),
                16:(256,66), 17:(256,74), 18:(256,98), 19:(256,50), 20:(32,18), 21:(256,110), 22:(256,82), 23:(256,136),
-               29:(256,56), 39:(32,17), 41:(128,18)}
+               29:(256,56), 39:(32,17), 40:(64,36), 41:(128,18)}
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
@@ -36,7 +36,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q5_0 (id: 6),
   Q5_1 (id: 7), Q8_0 (id: 8), Q2_K (id: 10), Q3_K (id: 11), Q4_K (id: 12), Q5_K (id: 13),
   Q6_K (id: 14), IQ2_XXS (id: 16), IQ2_XS (id: 17), IQ3_XXS (id: 18), IQ1_S (id: 19),
-  IQ4_NL (id: 20), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), IQ1_M (id: 29), MXFP4 (id: 39), Q1_0 (id: 41)
+  IQ4_NL (id: 20), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), IQ1_M (id: 29), MXFP4 (id: 39), NVFP4 (id: 40), Q1_0 (id: 41)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -169,15 +169,17 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       grid = _ggml_iq_grid(t.device, _ggml.iq1s_grid, (2048, 8))[q].reshape((-1, 8, 2, 2, 8))
       grid = (grid > 127).where(grid - 256, grid)
       return (dl * (grid + delta)).flatten(-4)
-    if ggml_type == 39:
-      e = blocks[:, 0].cast(dtypes.uint32)
-      small_bits = Tensor.const((0x00200000, 0x00400000), dtypes.uint32).to(t.device, force=True)[e.clip(0, 1).cast(dtypes.int32)] # e < 2
-      d = (e < 2).where(small_bits, (e - 1) * 0x00800000).bitcast(dtypes.float32).unsqueeze(-1)
-      codes = q_to_uint8(blocks[:, 1:17], 4)
-      fp4_lut = Tensor.const((0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0,
-                             -0.0,-1.0,-2.0,-3.0,-4.0,-6.0,-8.0,-12.0), dtypes.float32).to(t.device, force=True)
-      fp4_val = fp4_lut[codes]
-      return (fp4_val * d).flatten(-2)[:n]
+    if ggml_type in (39, 40):
+      if ggml_type == 39:
+        e = blocks[:, :1].cast(dtypes.uint32)
+        small_bits = Tensor.const((0x00200000, 0x00400000), dtypes.uint32).to(t.device, force=True)[e.clip(0, 1).cast(dtypes.int32)] # e < 2
+        d, codes = (e < 2).where(small_bits, (e - 1) * 0x00800000).bitcast(dtypes.float32), blocks[:, 1:]
+      else:
+        e = blocks[:, :4].cast(dtypes.uint32).unsqueeze(-1)
+        normal = (((e >> 3 & 0xF) + 119) << 23 | (e & 7) << 20).bitcast(dtypes.float32)
+        d, codes = (e == 0x7F).where(0, (e & 0x78 == 0).where((e & 7).cast(dtypes.float32) * 2**-10, normal)), blocks[:, 4:].reshape(-1, 4, 8)
+      fp4_lut = Tensor.const(_ggml.kvalues_mxfp4, dtypes.float32).to(t.device, force=True)
+      return (fp4_lut[q_to_uint8(codes, 4)] * d).flatten(-2)
     if ggml_type == 41:
       d = blocks[:,:2].bitcast(dtypes.float16)
       bits = q_to_uint8(blocks[:,2:], 1).reshape(-1, 8, 16).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
@@ -292,9 +294,9 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
   return {name: decode(name, shape, typ) for name, (_, shape, typ) in entries.items()}
 
 Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
-IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4 = 16, 17, 18, 19, 20, 21, 22, 23, 39
+IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4, NVFP4 = 16, 17, 18, 19, 20, 21, 22, 23, 39, 40
 QUANT_SIZES = {t: 256 // b * s for t, (b, s) in _GGML_QUANT.items()
-               if t in (Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4)}
+               if t in (Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4, NVFP4)}
 HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S)
 SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9, MXFP4: 17}
 

@@ -83,6 +83,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     self.assertNotIn("stale garbage", sample.read_text(encoding="utf-8"))
     self.assertNotIn("\x1b", sample.read_text(encoding="utf-8"))
     self.assertIsNone(slopkernels.get("nonexistent_llm_kernel"))
+    all_uirs = slopkernels.generate_all()
     # Release mode: slopkernels absent, tinygrad/llm/kernels/<name>.uir present -> loaded & executable directly from disk.
     has_amd = _amd_target() is not None
     llm_model._load_kernel.cache_clear()
@@ -110,7 +111,6 @@ class TestSlopKernelsUIR(unittest.TestCase):
       np.testing.assert_allclose(got_hc.numpy()[:, 8:].reshape(2, 4, 4).sum(-1), 1.0, rtol=2e-2, atol=2e-2)
     llm_model._load_kernel.cache_clear()
     llm_model._get_kernel.cache_clear()
-    all_uirs = slopkernels.generate_all()
     self.assertEqual(len(all_uirs), len(slopkernels._BUILDERS))
     self.assertEqual(len(list(uir_dir.glob("*.uir"))), len(all_uirs))
     self.assertLess(sum(len(v) for v in all_uirs.values()), 1_000_000)
@@ -158,11 +158,14 @@ class TestSlopKernelsUIR(unittest.TestCase):
       np.testing.assert_allclose(got_m[j], mw_ref_np[eid] @ x_m.numpy()[0], rtol=3e-2, atol=5e-2)
     # 4. Flash attention decode + prefill
     kv_fa = Tensor(rng.standard_normal((2, 1, 2, 128, 64)).astype(np.float16)).realize()
-    q_dec = Tensor(rng.standard_normal((1, 4, 1, 64)).astype(np.float16)).realize()
-    got_fd = _krun("amd_flash_decode", (1, 4, 1, 64), dev, q_dec, kv_fa, UOp.const(53),
-                   B=1, H_KV=2, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0).numpy()
-    ref_fd = q_dec.float().scaled_dot_product_attention(kv_fa[0, :, :, :53].float(), kv_fa[1, :, :, :53].float(), enable_gqa=True).numpy()
-    np.testing.assert_allclose(got_fd, ref_fd, rtol=5e-3, atol=5e-3)
+    for group in (2, 3, 5, 6, 7):
+      with self.subTest(group=group):
+        shape = (1, 2 * group, 1, 64)
+        q_dec = Tensor(rng.standard_normal(shape).astype(np.float16)).realize()
+        got_fd = _krun("amd_flash_decode", shape, dev, q_dec, kv_fa, UOp.const(53),
+                       B=1, H_KV=2, G=group, d_blks=1, n_blks=2, C=2, valid_kv_offset=0).numpy()
+        ref_fd = q_dec.float().scaled_dot_product_attention(kv_fa[0, :, :, :53].float(), kv_fa[1, :, :, :53].float(), enable_gqa=True).numpy()
+        np.testing.assert_allclose(got_fd, ref_fd, rtol=5e-3, atol=5e-3)
     if tgt[0] != 9:
       q_pre = Tensor(rng.standard_normal((1, 4, 32, 64)).astype(np.float16)).realize()
       got_fp = _krun(f"{arch_gemm}_flash_attn", (1, 4, 32, 64), dev, q_pre, kv_fa, UOp.const(64), UOp.const(32),
@@ -347,7 +350,6 @@ class TestSlopKernelsUIR(unittest.TestCase):
                         m_blks=16, m_tiles=4, out_features=2048, in_features=512, raw_bytes=int(w8g.numel())).numpy()
         ref1024 = (x1024.float() @ w8g_ref.T).numpy()
         np.testing.assert_allclose(got1024, ref1024, rtol=5e-2, atol=4e-2 * np.abs(ref1024).max())
-
 
 if __name__ == "__main__":
   unittest.main()

@@ -56,7 +56,7 @@ from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
+from tinygrad.helpers import Context, DEV, to_mv, ContextVar
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, get_elf_section
 
@@ -1841,19 +1841,6 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
     return regions
   return build(set(order))
 
-RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
-
-def linearize_basic_block(call:UOp):
-  return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op is Ops.BINARY))
-
-pm_render = PatternMatcher([
-  (UPat(Ops.NATIVE, name="native").call(allow_any_len=True), lambda native: UOp(Ops.BINARY, arg=native.arg.code.to_bytes())),
-  (UPat(Ops.CALL, src=(UPat.any(UPat(Ops.SINK), UPat(Ops.PROGRAM, src=(UPat(Ops.SINK),), allow_any_len=True)),),
-        allow_any_len=True, name="call"), linearize_basic_block),
-  (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)
-   if isinstance(root.arg, KernelInfo) and root.arg.name.startswith("emu ") else None),
-])
-
 pm_remove_native = PatternMatcher([
   (UPat(Ops.NATIVE, name="native"), lambda native: native.src[0]),
 ])
@@ -1867,15 +1854,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
   regions = cfg_regions(cfg["paths"], 0)
-  # propagate possible wave PCs across acyclic regions; loops retain runtime routing.
-  unconditional:set[int] = set()
-  possible:set[int]|None = {0}
-  for pc, body in regions:
-    if body: possible = None
-    elif possible is not None:
-      if possible == {pc}: unconditional.add(pc)
-      possible = (possible-{pc}) | (set(cfg["paths"][pc]) or {-1})
-  routed = len(unconditional) != len(regions)
+  routed = any(body or len(cfg["paths"][pc]) > 1 for pc, body in regions)
   axes = itertools.count(sum(inst.size() for inst in insts.values()))
   gx, gy, gz, lx, ly, lz, rsrc2, scratch_size = dispatch
   # init ranges
@@ -1946,8 +1925,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     params.append(UOp.param(len(bufs), dtypes.int, addrspace=AddrSpace.ALU))
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, dtype=dtypes.int)
-    gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
-                                                            1, dtype=dtypes.int),)
+    gates = (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int), 1, dtype=dtypes.int),) if routed else ()
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("emu_waves"))
@@ -1966,13 +1944,6 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     return end
 
   ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
-  if RENDER:
-    linear = graph_rewrite(ret, pm_render, name="render", enter_calls=True)
-    if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View Rendered Graph")
-    assert len(linear.src) == len(insts), f"{len(linear.src)} != {len(insts)}"
-    for (pc, inst), x in zip(insts.items(), linear.src):
-      out = x.arg if x.op is Ops.BINARY else b"".join(y.arg for y in x.src)
-      assert out == inst.to_bytes(), f"{inst.op_name.lower()}: {out.hex()} != {inst.to_bytes().hex()}"
   ret = graph_rewrite(ret, pm_remove_native, name="remove native", enter_calls=True)
   return ret
 

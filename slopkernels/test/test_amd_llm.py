@@ -18,6 +18,7 @@ from slopkernels.src.amd_gguf import (
   IQ3_S,
   IQ4_XS,
   MXFP4,
+  NVFP4,
   Q4_K,
   Q6_K,
   Q8_0,
@@ -107,8 +108,9 @@ class TestQ8Quantize(unittest.TestCase):
       packed[:, 80:82] = np.array([0.001], dtype=np.float16).view(np.uint8)
       packed[:, 82:84] = np.array([0.0002], dtype=np.float16).view(np.uint8)
     elif ggml_type == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(122, 128, packed.size // 17)
+    elif ggml_type == 40: packed.reshape(-1, 36)[:, :4] = rng.integers(0x18, 0x20, (packed.size // 36, 4))
     elif ggml_type in SMALL_BLOCK_QUANTS:
-      packed.reshape(-1, SMALL_BLOCK_QUANTS[ggml_type] * 2)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
+      packed.reshape(-1, SMALL_BLOCK_QUANTS[ggml_type][1] * 2)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     if ggml_type in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
     raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
@@ -175,6 +177,8 @@ class TestQ8Quantize(unittest.TestCase):
   def test_iq2_s_linear(self): self._test_split_k_and_wmma(22)
   def test_mxfp4_linear(self): self._test_quant_linear(39, 136, in_features=1056, token_counts=(1, 3))
   def test_mxfp4_linear_wmma(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(16,))
+  def test_nvfp4_linear(self): self._test_quant_linear(40, 144, in_features=320, out_features=16, token_counts=(1,))
+  def test_nvfp4_linear_gemm(self): self._test_quant_linear(40, 144, in_features=320, out_features=16, token_counts=(16,))
 
   def test_wmma_linear_symbolic(self):
     def _no_gemv(name:str):
@@ -203,7 +207,7 @@ class TestQ8Quantize(unittest.TestCase):
       if typ == 40: continue
       with self.subTest(ggml_type=typ):
         packed = rng.integers(0, 256, (16, size), dtype=np.uint8)
-        blocks = packed.reshape(-1, SMALL_BLOCK_QUANTS[typ]*2) if typ in SMALL_BLOCK_QUANTS and typ != 39 else packed
+        blocks = packed.reshape(-1, SMALL_BLOCK_QUANTS[typ][1]*2) if typ in SMALL_BLOCK_QUANTS and typ != 39 else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
         if typ == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(100, 141, 16*8)  # mxfp4 e8m0 scales: fp16 rounds e < 100 to 0, e > 140 overflows
         else: blocks[:, offset:offset+2] = np.resize(scales, len(blocks)).view(np.uint8).reshape(-1, 2)
@@ -345,12 +349,13 @@ class TestQ8Quantize(unittest.TestCase):
         np.testing.assert_array_equal(out.numpy(), 32)
         np.testing.assert_array_equal(state.numpy(), 1)
 
-  def _test_moe_decode(self, typ:int):
+  def _test_moe_decode(self, typ:int, IN:int=256):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(5)
-    E, T, K, IN, OUT, size = 4, 1, 2, 256, 16, QUANT_SIZES[typ]
+    E, T, K, OUT, size = 4, 1, 2, 16, QUANT_SIZES[typ]
     blocks = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
     if typ == MXFP4: blocks.reshape(-1, 17)[:, 0] = rng.integers(122, 128, blocks.size//17)  # e8m0 scales
+    elif typ == NVFP4: blocks.reshape(-1, 36)[:, :4] = rng.integers(0x18, 0x20, (blocks.size//36, 4))
     else: blocks[:, :4] = np.array([0.001, 0.0001], np.float16).view(np.uint8)
     decoded = ggml_data_to_tensor(Tensor(blocks.flatten()).contiguous().realize(), E*OUT*IN, typ).reshape(E, OUT, IN)
     w = reference_weight(blocks, typ, E, OUT, IN)
@@ -370,6 +375,7 @@ class TestQ8Quantize(unittest.TestCase):
   def test_moe_decode_iq1_s(self): self._test_moe_decode(IQ1_S)
   def test_moe_decode_iq3_s(self): self._test_moe_decode(IQ3_S)
   def test_moe_decode_mxfp4(self): self._test_moe_decode(MXFP4)
+  def test_moe_decode_nvfp4(self): self._test_moe_decode(NVFP4, IN=320)
 
   def test_gated_delta_random_scan(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
