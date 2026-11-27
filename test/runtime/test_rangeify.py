@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, dtypes, Variable
-from tinygrad.helpers import Context, GlobalCounters, getenv, DEBUG
+from tinygrad.helpers import Context, DEBUG
 from tinygrad.uop.ops import UOp
 
 class TestDoubleMatmul(unittest.TestCase):
@@ -73,24 +73,6 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     node_val2 = forest.gather(0, idx2)
     result = (node_val + node_val2).numpy()
     self.assertEqual(result.tolist(), [1, 1])
-
-if getenv("BIG") > 2:
-  # llama 8B (8192)
-  BS, HEADS, SEQLEN, EMB = 4, 32, 8192, 128
-elif getenv("BIG") > 1:
-  # llama 8B
-  BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
-elif getenv("BIG") > 0:
-  # bigger
-  BS, HEADS, SEQLEN, EMB = 4, 32, 128, 128
-else:
-  BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
-
-def fa():
-  Tensor.manual_seed(1337)
-  with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-  GlobalCounters.reset()
-  return q.scaled_dot_product_attention(k, v)
 
 # contiguous + reduce can support ranges?
 

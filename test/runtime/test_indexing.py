@@ -4,7 +4,7 @@ import unittest, random
 import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, Variable, GlobalCounters
-from tinygrad.helpers import all_same, prod
+from tinygrad.helpers import prod
 
 random.seed(42)
 
@@ -15,35 +15,6 @@ def numpy_testing_assert_equal_helper(a, b):
 
 def consec(shape, start=1):
   return Tensor.arange(prod(shape)).reshape(shape)+start
-
-# creates strided tensor with base set to reference tensor's base, equivalent to torch.set_()
-def set_(reference: Tensor, shape, strides, offset):
-  raise NotImplementedError("need to implement without calling uop.view")
-  """
-  if reference.uop.base.realized is None: reference.realize()
-  assert reference.uop.base.realized, "base has to be realized before setting it to strided's base"
-  strided = Tensor(reference.uop.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
-  assert strided.uop.st.real_strides() == strides, "real_strides should equal strides for strided"
-  return strided
-  """
-
-def clone(original:Tensor): return original.clone()
-def copy_(src:Tensor, other:Tensor) -> Tensor: return src.clone()
-def argsort(tensor:Tensor) -> Tensor:
-  pass
-
-# https://pytorch.org/docs/stable/generated/torch.all.html
-def all_(tensor:Tensor) -> Tensor:
-  return tensor != 0
-
-# https://pytorch.org/docs/stable/generated/torch.diagonal.html
-def diagonal(tensor:Tensor) -> Tensor:
-  assert tensor.ndim == 2 and all_same(tensor.shape), 'only support 2 ndim square tensors'
-  return (Tensor.eye(tensor.shape[0]) * tensor).sum(0)
-
-# https://numpy.org/doc/stable/reference/generated/numpy.unravel_index.html
-def unravel_index(tensor, shape):
-  pass
 
 class TestIndexing(unittest.TestCase):
   def test_index(self):
@@ -134,8 +105,8 @@ class TestIndexing(unittest.TestCase):
     self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
     self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
 
-    def delitem(): del reference[0]
-    self.assertRaises(TypeError, delitem)
+    with self.assertRaises(TypeError):
+      del reference[0]
 
   def test_set_item_to_scalar_tensor(self):
     m = random.randint(1, 10)
@@ -379,11 +350,8 @@ class TestIndexing(unittest.TestCase):
     x = Tensor(10)
     numpy_testing_assert_equal_helper(x, x.item())
 
-    def runner():
-      print(x[0])
-      return x[0]
-
-    self.assertRaises(IndexError, runner)
+    with self.assertRaises(IndexError):
+      x[0]
 
   # TODO fancy setitem
   '''

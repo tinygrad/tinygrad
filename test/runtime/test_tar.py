@@ -5,7 +5,7 @@ from tinygrad.nn.state import tar_extract
 
 class TestTarExtractFile(unittest.TestCase):
   def setUp(self):
-    self.test_dir = tempfile.mkdtemp()
+    self.test_dir = self.enterContext(tempfile.TemporaryDirectory())
     self.test_files = {
       'file1.txt': b'Hello, World!',
       'file2.bin': b'\x00\x01\x02\x03\x04',
@@ -23,13 +23,6 @@ class TestTarExtractFile(unittest.TestCase):
     self.invalid_tar_path = os.path.join(self.test_dir, 'invalid.tar')
     with open(self.invalid_tar_path, 'wb') as f:
       f.write(b'This is not a valid tar file')
-
-  def tearDown(self):
-    for filename in self.test_files:
-      os.remove(os.path.join(self.test_dir, filename))
-    os.remove(self.tar_path)
-    os.remove(self.invalid_tar_path)
-    os.rmdir(self.test_dir)
 
   def test_tar_extract_content_values(self):
     result = tar_extract(self.tar_path)

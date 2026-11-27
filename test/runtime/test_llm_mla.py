@@ -6,19 +6,14 @@ from tinygrad.llm.hf import e4m3fn_to_fnuz
 from test.runtime.test_llm_quantized import fp8_reference
 
 class TestMLA(unittest.TestCase):
-  def _make_config(self, **kwargs):
-    return TransformerConfig(**{
-      "num_blocks": 1, "dim": 64, "hidden_dim": 128, "n_heads": 4, "n_kv_heads": 1,
-      "norm_eps": 1e-5, "vocab_size": 100, "head_dim": 16, "rope_theta": 10000.0, "rope_dim": 8, "max_context": 32,
-      "kv_lora_rank": 16, "v_head_dim": 8,
-    } | kwargs)
-
   def test_mla_attention_matches_naive(self):
     Tensor.manual_seed(0)
     self._test_mla_attention(False)
 
   def _test_mla_attention(self, interleave, fnuz=None):
-    config = self._make_config(max_context=16, rope_interleave=interleave, rope_dim=4)
+    config = TransformerConfig(
+      num_blocks=1, dim=64, hidden_dim=128, n_heads=4, n_kv_heads=1, norm_eps=1e-5, vocab_size=100,
+      head_dim=16, rope_theta=10000.0, rope_dim=4, max_context=16, kv_lora_rank=16, v_head_dim=8, rope_interleave=interleave)
 
     block = MLATransformerBlock(config)
     c = config

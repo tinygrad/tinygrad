@@ -8,14 +8,6 @@ from tinygrad.helpers import fetch, Context
 from extra.onnx_helpers import validate
 from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
 
-def run_onnx_torch(onnx_model, inputs):
-  import torch
-  from onnx2torch import convert
-  torch_model = convert(onnx_model).float()
-  with torch.no_grad():
-    torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
-  return torch_out
-
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
@@ -62,23 +54,7 @@ class TestOnnxModel(unittest.TestCase):
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls._ctx = Context(MAX_BUFFER_SIZE=0)
-    cls._ctx.__enter__()
-
-  @classmethod
-  def tearDownClass(cls):
-    cls._ctx.__exit__()
-
-  def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
-    onnx_model_path = snapshot_download_with_retry(
-      repo_id=repo_id,
-      allow_patterns=["*.onnx", "*.onnx_data"],
-      local_dir=DOWNLOADS_DIR / repo_id
-    )
-    onnx_model_path = onnx_model_path / model_file
-    file_size = onnx_model_path.stat().st_size
-    print(f"Validating model: {repo_id}/{model_file} ({file_size/1e6:.2f}M)")
-    validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
+    cls.enterClassContext(Context(MAX_BUFFER_SIZE=0))
 
   def test_xlm_roberta_large(self):
     repo_id = "FacebookAI/xlm-roberta-large"
@@ -87,7 +63,13 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
       "input_ids": np.random.randint(0, 250002, (1, 11), dtype=np.int64),
       "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
-    self._validate(repo_id, model_file, custom_inputs, atol=1e-3)
+    onnx_model_path = snapshot_download_with_retry(
+      repo_id=repo_id,
+      allow_patterns=["*.onnx", "*.onnx_data"],
+      local_dir=DOWNLOADS_DIR / repo_id
+    )
+    onnx_model_path = onnx_model_path / model_file
+    validate(onnx_model_path, custom_inputs, rtol=1e-4, atol=1e-3)
 
 if __name__ == "__main__":
   unittest.main()

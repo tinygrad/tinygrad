@@ -11,9 +11,6 @@ from test.mockgpu.amd.emu import run_asm
 from tinygrad.renderer.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
 from test.helpers import run_schedule
 
-def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
-def _f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xFFFFFFFF))[0]
-
 # f16 conversion helpers
 def f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xFFFF))[0]
 def f32_to_f16(f: float) -> int:
@@ -53,7 +50,6 @@ def get_gpu_target() -> tuple[int, int, int]:
 
 def skip_unless_gfx(min_major: int, min_minor: int = 0, reason: str = ""):
   """Skip test if GPU target is below the minimum required version."""
-  import unittest
   def decorator(test_func):
     if not USE_HW: return test_func
     target = get_gpu_target()
@@ -70,8 +66,8 @@ def _out_bytes(n_lanes: int) -> int: return max(N_VGPRS * n_lanes * 4, _VGPR_REG
 OUT_BYTES = _out_bytes(WAVE_SIZE)  # default for single-wave (backward compat)
 
 # Float conversion helpers
-def f2i(f: float) -> int: return _i32(f)
-def i2f(i: int) -> float: return _f32(i)
+def f2i(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
+def i2f(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xFFFFFFFF))[0]
 def f2i64(f: float) -> int: return struct.unpack('<Q', struct.pack('<d', f))[0]
 def i642f(i: int) -> float: return struct.unpack('<d', struct.pack('<Q', i))[0]
 
@@ -244,7 +240,7 @@ def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgp
       emu_val = emu_st.vgpr[lane][i]
       hw_val = hw_st.vgpr[lane][i]
       if emu_val != hw_val:
-        emu_f, hw_f = _f32(emu_val), _f32(hw_val)
+        emu_f, hw_f = i2f(emu_val), i2f(hw_val)
         if math.isnan(emu_f) and math.isnan(hw_f):
           continue
         # Check ULP difference for floats (only for same-sign values)

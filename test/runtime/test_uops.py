@@ -167,11 +167,6 @@ class TestNonFloatUOps(TestUOps):
     self._test_top_fxn(Ops.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float16, dtypes.float16))
 
 class TestBoolUOps(TestUOps):
-  def _test_uop_bool_fxn(self, op, fxn):
-    for f in [_test_single_value, _test_single_value_const]:
-      for a in [False, True]:
-        self._equal(f([a], op, (dtypes.bool, )*1), fxn(a))
-
   def _test_bop_bool_fxn(self, op, fxn):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [False, True]:

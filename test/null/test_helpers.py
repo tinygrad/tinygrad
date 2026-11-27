@@ -10,11 +10,6 @@ import numpy as np
 VARIABLE = ContextVar("VARIABLE", 0)
 
 class TestContextVars(unittest.TestCase):
-  # Ensuring that the test does not modify variables outside the tests.
-  ctx = Context()
-  def setUp(self): TestContextVars.ctx.__enter__()
-  def tearDown(self): TestContextVars.ctx.__exit__()
-
   def test_cannot_recreate(self):
     _TMP2 = ContextVar("_TMP2", 1)
     with self.assertRaises(RuntimeError):

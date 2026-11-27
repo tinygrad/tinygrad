@@ -21,9 +21,8 @@ class TestAttention(unittest.TestCase):
     check_schedule(attn, 4)
 
   def test_apply_rope_jit_prune(self):
-    def rope_fn(x_in, pos): return apply_rope(x_in, pos)
-    rope_noprune = TinyJit(rope_fn)
-    rope_prune = TinyJit(rope_fn, prune=True)
+    rope_noprune = TinyJit(apply_rope)
+    rope_prune = TinyJit(apply_rope, prune=True)
 
     v_pos = UOp.variable("start_pos", 0, 100)
     for _ in range(3):

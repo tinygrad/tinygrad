@@ -1,42 +1,14 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
-import unittest, io, sys, re
-from dataclasses import dataclass
+import unittest, re
 from tinygrad import Device
 from tinygrad.renderer.amd import detect_format
 from test.amd.helpers import llvm_assemble, llvm_disasm, get_target, get_mattr
 from test.amd.disasm import disasm
 
-def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
-  """Disassemble ELF binary and return list of (instruction_text, machine_code_bytes)."""
-  old_stdout = sys.stdout
-  sys.stdout = io.StringIO()
-  compiler.disassemble(lib)
-  output = sys.stdout.getvalue()
-  sys.stdout = old_stdout
-
-  results = []
-  for line in output.splitlines():
-    if '//' not in line: continue
-    instr = line.split('//')[0].strip()
-    if not instr: continue
-    comment = line.split('//')[1].strip()
-    if ':' not in comment: continue
-    hex_str = comment.split(':')[1].strip().split()[0]
-    try:
-      machine_bytes = bytes.fromhex(hex_str)[::-1]  # big-endian to little-endian
-      results.append((instr, machine_bytes))
-    except ValueError:
-      continue
-  return results
-
 def compile_asm(instr: str, arch: str = 'rdna3') -> bytes:
   """Compile a single instruction using LLVM."""
   return llvm_assemble([instr], get_target(arch), get_mattr(arch))[0]
-
-def compile_asm_batch(instrs: list[str], arch: str = 'rdna3') -> list[bytes]:
-  """Compile multiple instructions with a single LLVM emission."""
-  return llvm_assemble(instrs, get_target(arch), get_mattr(arch))
 
 def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str]:
   """Compile instructions with LLVM and get LLVM's disassembly."""
@@ -45,68 +17,29 @@ def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str
   code = b''.join(llvm_assemble(instrs, mcpu, mattr))
   return llvm_disasm(code, mcpu, mattr)[:len(instrs)]
 
-@dataclass
-class KernelSnapshot:
-  code: bytes
-  src: str
-  global_size: tuple[int, int, int]
-  local_size: tuple[int, int, int]
-  buf_idxs: list[int]  # indices into shared buffer pool
-  buf_sizes: list[int]  # sizes for each buffer index
-
-def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, int], dict[int, bytes]]:
-  """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
+def get_kernels_from_tinygrad(op_fn) -> list[str]:
+  """Compile a tinygrad operation and extract the source of each kernel."""
   from tinygrad import Tensor
   from tinygrad.uop.ops import Ops
-  from tinygrad.codegen.compile import lower_and_compile, get_call_arg_uops
+  from tinygrad.codegen.compile import lower_and_compile
   from test.helpers import bound_schedule
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
   linear = lower_and_compile(bound_schedule(out))
   kernels = []
-  buf_pool: dict[int, int] = {}  # buffer id -> size
-  buf_data: dict[int, bytes] = {}  # buffer id -> initial data from bulk STORE
 
   for call in linear.src:
     ast = call.src[0]
-    bufs = [b.buffer for b in get_call_arg_uops(call)]
-    if ast.op is Ops.STORE:
-      # Handle bulk STORE: extract source data to initialize destination buffer
-      if len(bufs) >= 2:
-        dst_buf, src_buf = bufs[0], bufs[1]
-        dst_id = id(dst_buf)
-        if dst_id not in buf_pool:
-          buf_pool[dst_id] = dst_buf.nbytes
-        # Get source data if it's from numpy/CPU
-        if hasattr(src_buf, 'base') and src_buf.base is not None and src_buf.base.is_allocated():
-          src_data = bytes(src_buf.base.as_memoryview())
-          buf_data[dst_id] = src_data
-    elif ast.op is Ops.PROGRAM:
-      info = ast.arg
-      if len(ast.src) > 3 and ast.src[3].op is Ops.BINARY:
-        lib = bytes(ast.src[3].arg)
-        _, sections, _ = elf_loader(lib)
-        for sec in sections:
-          if sec.name == '.text':
-            buf_idxs = []
-            buf_sizes = []
-            for b in bufs:
-              buf_id = id(b)
-              if buf_id not in buf_pool:
-                buf_pool[buf_id] = b.nbytes
-              buf_idxs.append(buf_id)
-              buf_sizes.append(b.nbytes)
-            kernels.append(KernelSnapshot(
-              code=bytes(sec.content),
-              src=ast.src[2].arg,
-              global_size=tuple(info.global_size),
-              local_size=tuple(info.local_size),
-              buf_idxs=buf_idxs,
-              buf_sizes=buf_sizes
-            ))
+    if ast.op is not Ops.PROGRAM: continue
+    if len(ast.src) <= 3 or ast.src[3].op is not Ops.BINARY: continue
+    lib = bytes(ast.src[3].arg)
+    _, sections, _ = elf_loader(lib)
+    for sec in sections:
+      if sec.name == '.text':
+        kernels.append(ast.src[2].arg)
   if not kernels: raise RuntimeError("No kernel found")
-  return kernels, buf_pool, buf_data
+  return kernels
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestTinygradKernelRoundtrip(unittest.TestCase):
@@ -126,7 +59,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler
     from tinygrad.helpers import DEV
 
-    kernels, _, _ = get_kernels_from_tinygrad(op_fn)
+    kernels = get_kernels_from_tinygrad(op_fn)
     # rendered source can be C or llvmir
     compiler = (AMDLLVMCompiler if DEV.renderer == "LLVM" else HIPCompiler)(get_target(arch))
 
@@ -134,7 +67,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
     for ki, kernel in enumerate(kernels):
       offset = 0
-      code = next((s.content for s in elf_loader(compiler.compile(kernel.src))[1] if s.name == ".text"))
+      code = next((s.content for s in elf_loader(compiler.compile(kernel))[1] if s.name == ".text"))
       while offset < len(code):
         remaining = code[offset:]
         fmt = detect_format(remaining, arch)
@@ -159,22 +92,20 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
 
     # Collect disasm strings for batched LLVM calls - skip unknown opcodes (op_X) that LLVM can't compile
     asm_test_instrs: list[tuple[int, str, bytes]] = []  # (idx, our_disasm, orig_bytes) for asm test
-    disasm_test_instrs: list[tuple[int, str]] = []  # (idx, our_disasm) for disasm comparison test
 
     for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
       if our_disasm is None: continue
       # Skip unknown opcodes and malformed instructions
       if our_disasm.startswith('op_') or re.search(r', \d+, \d+, \d+,', our_disasm): continue
       asm_test_instrs.append((idx, our_disasm, orig_bytes))
-      disasm_test_instrs.append((idx, our_disasm))
 
     # Batch compile for asm test (our disasm -> LLVM asm -> bytes)
-    asm_llvm_results = compile_asm_batch([d for _, d, _ in asm_test_instrs], arch)
+    asm_llvm_results = llvm_assemble([d for _, d, _ in asm_test_instrs], get_target(arch), get_mattr(arch))
     asm_llvm_map = {idx: (result, orig) for (idx, _, orig), result in zip(asm_test_instrs, asm_llvm_results)}
 
     # Batch compile+disasm for disasm comparison test
-    disasm_llvm_results = compile_and_disasm_batch([d for _, d in disasm_test_instrs], arch)
-    disasm_llvm_map = {idx: result for (idx, _), result in zip(disasm_test_instrs, disasm_llvm_results)}
+    disasm_llvm_results = compile_and_disasm_batch([d for _, d, _ in asm_test_instrs], arch)
+    disasm_llvm_map = {idx: result for (idx, _, _), result in zip(asm_test_instrs, disasm_llvm_results)}
 
     # Now evaluate results
     decode_passed, decode_failed, decode_skipped = 0, 0, 0
@@ -182,7 +113,6 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     disasm_passed, disasm_failed, disasm_skipped = 0, 0, 0
     decode_failures: list[str] = []
     asm_failures: list[str] = []
-    disasm_failures: list[str] = []
 
     for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
       # Decode test
@@ -216,7 +146,6 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
           disasm_passed += 1
         else:
           disasm_failed += 1
-          disasm_failures.append(f"K{ki}@{offset}: ours='{our_disasm}' llvm='{llvm_disasm_str}'")
       else:
         disasm_skipped += 1
 

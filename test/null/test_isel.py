@@ -14,14 +14,6 @@ class TestIselX86(unittest.TestCase):
     x = pack_args(x, ProgramInfo.from_sink(x).params)
     return graph_rewrite(x, X86Renderer(Target(device="CPU", arch="x86_64")).isel_matcher, IselContext(), bottom_up=True)
 
-  def _check_op(self, dt_op, expr):
-    nargs = expr.__code__.co_argcount
-    for dt,op in dt_op:
-      with self.subTest(dtype=dt):
-        v = [UOp.variable(str(i), 0, 0, dt) for i in range(nargs)]
-        n = self.isel_rewrite(expr(*v))
-        self.assertIs(n.body.arg.code, op)
-
   def test_cmove(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
     b = UOp.variable("b", 0, 0, dtypes.int32)

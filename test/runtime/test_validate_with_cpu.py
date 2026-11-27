@@ -4,9 +4,7 @@ from test.helpers import needs_devices
 
 class TestValidateWithCPU(unittest.TestCase):
   def setUp(self):
-    self.ctx = Context(VALIDATE_WITH_CPU=1)
-    self.ctx.__enter__()
-  def tearDown(self): self.ctx.__exit__(None, None, None)
+    self.enterContext(Context(VALIDATE_WITH_CPU=1))
 
   def test_add(self): self.assertListEqual((Tensor([1.,2,3])+Tensor([4.,5,6])).tolist(), [5.0, 7.0, 9.0])
   def test_mul(self): self.assertListEqual((Tensor([1.,2,3])*Tensor([4.,5,6])).tolist(), [4.0, 10.0, 18.0])
