@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, Context, DEV
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
@@ -171,6 +171,24 @@ def custom_data_deps(A:UOp) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
 
+def custom_call(A:UOp) -> UOp:
+  A = A.flatten()
+  threads = UOp.special(A.numel(), "lidx0")
+  k = Kernel()
+  k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+  k.emit(v_mov_b32_e32(v[1], 0))
+  for _ in range(2): k.emit(s_call_b64(s[2:3], 0), target="add_one")
+  k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+  k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
+  k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]))
+  k.emit(s_endpgm())
+  k.label("add_one")
+  k.emit(v_add_nc_u32_e32(v[1], 1, v[1]))
+  k.emit(s_setpc_b64(ssrc0=s[2:3]))
+  insts = k.finalize()
+  sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_call"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
   def setUp(self):
@@ -218,6 +236,13 @@ class TestAsmKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a, fxn=custom_data_deps)[0]
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
+
+  def test_call(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    if DEV.interface.startswith("MOCK"): self.skipTest("emulator does not support s_setpc_b64")
+    a = Tensor(np.full(32, -1, dtype=np.int32)).realize()
+    a = Tensor.custom_kernel(a, fxn=custom_call)[0]
+    self.assertListEqual(a.tolist(), [2]*32)
 
   @Context(RELIFT=1)
   def test_cfg_branch_diamond(self):
