@@ -37,8 +37,7 @@ def get_output(p:UOp, renderer:Renderer, asm:bool=False) -> str:
     parts.append("\n\n".join(blocks))
   return "\n".join(parts)
 
-def replay_asm(ast:UOp, code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str,
-               backends:tuple[str, ...], asm:bool=False) -> tuple[str, str, tuple]:
+def replay_asm(ast:UOp, code:bytes, arch:str, dispatch:tuple, name:str="", *, backends:tuple[str, ...], asm:bool=False) -> tuple[str, str, tuple]:
   compare = lift(code, arch, dispatch, name)
   good_outs, compare_outs = [], []
   for backend in backends:
