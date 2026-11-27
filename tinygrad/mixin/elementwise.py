@@ -67,7 +67,7 @@ class ElementwiseMixin(CreationMixin):
     """
     uop = self._uop
     if self.dtype in dtypes.weaks or uop.op is Ops.STAGE or self.device is None or uop.has_buffer_identity(): return self
-    return self._wrap_uop(uop.alu(Ops.STAGE))
+    return self._wrap_uop(uop.stage())
 
   def contiguous_backward(self) -> Self:
     """

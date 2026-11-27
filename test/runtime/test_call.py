@@ -151,7 +151,7 @@ class TestCallSchedule(unittest.TestCase):
     x = Tensor([1., 2., 3., 4.]).realize()
     p, tmp = UOp.param(0, dtypes.float, (4,)), UOp.alloc((4,), dtypes.float)
     with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
-      Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True)).realize()
+      Tensor(((p + 1).stage() * 2).call_with_output(x.uop, precompile=True)).realize()
     with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
       Tensor((tmp.after(tmp.store(p + 1)) * 2).call_with_output(x.uop)).realize()
 

@@ -94,7 +94,7 @@ class TestScheduleScaling(unittest.TestCase):
       return result
     self._assert_linear(matmul_chain)
 
-  # contiguous chain stresses remove_bufferize callbacks (toposort per BUFFERIZE node)
+  # contiguous chain stresses remove_stage callbacks (toposort per STAGE node)
   def test_contiguous_scaling(self):
     def contiguous_chain(n):
       x = Tensor.empty(256, 256)

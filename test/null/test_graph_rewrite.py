@@ -151,7 +151,7 @@ class TestRecurse(unittest.TestCase):
         self.assertIn("waits for", str(cm.exception))
 
   def test_self_referential_call_argument(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.float).bufferize()
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float).stage()
     pm = PatternMatcher([(UPat(Ops.STAGE, name="x"), lambda x: UOp.native("f", x.param_like(0)).call(x))])
     with self.assertRaisesRegex(RuntimeError, "unresolved rewrite dependencies") as cm:
       graph_rewrite(a.sink(), pm, bottom_up=True)
@@ -177,7 +177,7 @@ class TestRecurse(unittest.TestCase):
 
 class TestCallRewrite(unittest.TestCase):
   def test_wrap_node_in_call(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.float).bufferize()
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float).stage()
     call = UOp.native("f", a).call()
     for walk in (False, True):
       for bottom_up in (False, True):
