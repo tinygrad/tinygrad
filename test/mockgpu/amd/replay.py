@@ -39,7 +39,7 @@ def get_output(p:UOp, renderer:Renderer, asm:bool=False) -> str:
 
 def replay_asm(ast:UOp, code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str,
                backends:tuple[str, ...], asm:bool=False) -> tuple[str, str, tuple]:
-  compare = lift(code, arch, renderer, dispatch, name)
+  compare = lift(code, arch, dispatch, name)
   good_outs, compare_outs = [], []
   for backend in backends:
     target = Target("AMD", "HIP", {"rdna3":"gfx1100", "rdna4":"gfx1200", "cdna":"gfx950"}[arch]) if backend == "amd" else \

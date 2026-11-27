@@ -1960,11 +1960,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size)
     renderer = Device['CPU'].renderer
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}"), renderer)
+      dispatch_cache[key] = to_program(lift(code, arch, dispatch, f"emu {name}"), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
-          ret = to_program(lift(relift_lib, arch, Device["AMD"].renderer, dispatch, f"relift_{relift_count} {name}"), Device["AMD"].renderer)
+          ret = to_program(lift(relift_lib, arch, dispatch, f"relift_{relift_count} {name}"), Device["AMD"].renderer)
         except Exception:
           print("relift err", traceback.format_exc())
           break
