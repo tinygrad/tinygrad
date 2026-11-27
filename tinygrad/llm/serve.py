@@ -25,7 +25,7 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
       call = json.loads(s)
-      return call["name"], call.get("arguments", call.get("parameters", call.get("args", {})))
+      return call["name"], call.get("arguments", call.get("parameters", {}))
     except (json.JSONDecodeError, KeyError): return None
   # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
   # GLM format: name<arg_key>key</arg_key><arg_value>value</arg_value>...
@@ -60,20 +60,17 @@ def disconnected(conn:socket.socket) -> bool:
   except OSError: return True
 
 class StreamRouter:
-  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .calls for the final parse
-  # (start think, end think, message header, end content, tool call, special token that selects the format)
-  FORMATS = (("<think>", "</think>", "", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", "<tool_call>"),
-             ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "", "<|close|>response<|sep|>",
+  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
+  # (start think, end think, end content, tool call, special token that selects the format)
+  FORMATS = (("<think>", "</think>", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", "<tool_call>"),
+             ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "<|close|>response<|sep|>",
               r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)", "<|close|>"),
              # the calls block is function_calls (V3.2), tool_calls (V4) or " calls" (V4.1)
-             ("<think>", "</think>", "", f"\n\n<{DSML}", rf"<{DSML} ?invoke (.*?)\s*(?:</{DSML} ?invoke>|$)", DSML),
-             # Inkling: <|message_model|>name<|content_invoke_tool_json|>{"name":...,"args":{...}}<|end_message|>
-             ("<|message_model|><|content_thinking|>", "<|end_message|>", r"<\|message_model\|>[^<]*<\|content_(\w+)\|>", "<|end_message|>",
-              r"<\|content_invoke_tool_json\|>(.*?)(?:<\|end_message\|>|$)", "<|content_invoke_tool_json|>"))
+             ("<think>", "</think>", f"\n\n<{DSML}", rf"<{DSML} ?invoke (.*?)\s*(?:</{DSML} ?invoke>|$)", DSML))
   def __init__(self, special_tokens:dict[str, int], reasoning:bool=False):
-    self.think, self.end_think, self.header, self.end_content, self.call = next((f for f in self.FORMATS if f[-1] in special_tokens),
-                                                                                self.FORMATS[0])[:-1]
-    self.buf = self.calls = ""
+    self.think, self.end_think, self.end_content, self.call = next((f for f in self.FORMATS if f[-1] in special_tokens),
+                                                                   self.FORMATS[0])[:-1]
+    self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
   def split(self, tag:str, final:bool) -> tuple[str, bool]:
     # split buf on the first full tag, holding back a partial tag at the end unless final
@@ -85,23 +82,18 @@ class StreamRouter:
     return emit, False
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
-    if self.mode == "undecided" and self.header:
-      if not (m := re.match(self.header, self.buf)) and not final and self.end_content not in self.buf: return
-      self.mode = {"thinking":"reasoning", "text":"content", "invoke_tool_json":"tool"}.get(m.group(1), "content") if m else "content"
-      if m and self.mode != "tool": self.buf = self.buf[m.end():]
     if self.mode == "undecided":  # decide whether the output starts with a think block
       if not final and len(self.buf) < len(self.think) and self.think.startswith(self.buf): return
       self.mode, self.buf = ("reasoning", self.buf[len(self.think):]) if self.buf.startswith(self.think) else ("content", self.buf)
-    if self.mode == "tool" and not self.header:
-      self.calls, self.buf = self.calls + self.buf, ""
-      return
-    emit, done = self.split(self.end_think if self.mode == "reasoning" else self.end_content, final)
-    if self.mode == "tool": self.calls += emit + (self.end_content if done else "")
-    elif emit: yield "reasoning_content" if self.mode == "reasoning" else "content", emit
-    if not done: return
-    if self.header: self.mode = "undecided"
-    else: self.mode, self.buf = ("content", self.buf) if self.mode == "reasoning" else ("tool", self.end_content + self.buf)
-    yield from self.route("", final)
+    if self.mode == "reasoning":
+      emit, done = self.split(self.end_think, final)
+      if emit: yield "reasoning_content", emit
+      if not done: return
+      self.mode = "content"
+    if self.mode == "tool": return
+    emit, found = self.split(self.end_content, final)
+    if emit: yield "content", emit
+    if found: self.mode, self.buf = "tool", self.end_content + self.buf
 
 class Request:
   def __init__(self, ids:list[int], disconnected:typing.Callable[[], bool], max_tokens:int|None=None, temperature:float=0.0, log_prefix:str=""):
@@ -143,7 +135,7 @@ class Handler(VizHandler):
     finish_reason = req.finish_reason
     for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
     tool_calls: list[dict] = []
-    for m in re.finditer(router.call, router.calls, re.DOTALL):
+    for m in re.finditer(router.call, router.buf, re.DOTALL):
       if (parsed := parse_tool_call(m.group(1))) is None:
         stderr_log(f"{colored('failed to parse tool call', 'red')}: {m.group(1)[:200]}\n")
         yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
