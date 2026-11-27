@@ -628,6 +628,14 @@ class QCOMCLRenderer(OpenCLRenderer):
     if not (IMAGE and FLOAT16): unsupported.add(dtypes.half)
     return Renderer.supported_dtypes(self) - unsupported
 
+  # QCOM miscompiles the int min ~max(~a,~b) (max is (p<q)?q:p here), use min()
+  string_rewrite = PatternMatcher([
+    (UPat(Ops.XOR, dtypes.ints, [UPat(Ops.WHERE, src=(UPat(Ops.CMPLT, src=(UPat.var("p"), UPat.var("q"))), UPat.var("q"), UPat.var("p"))),
+                                 UPat.var("k")], name="x"),
+     lambda ctx,x,p,q,k: f"min({ctx.render_cast(x, f'{ctx[p]}^{ctx[k]}')},{ctx.render_cast(x, f'{ctx[q]}^{ctx[k]}')})"
+       if (c:=k.src[0] if k.op is Ops.CAST else k).op is Ops.CONST and c.arg in (-1, x.dtype.max) and (p.op is Ops.XOR or q.op is Ops.XOR) else None),
+  ]) + OpenCLRenderer.string_rewrite
+
   # QCOM's load vectorizer emits invalid IR for vectorized bool loads ("Range types must match load type"), type bool buffers as uchar
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False, shape=None):
     if dtype == dtypes.bool and addrspace == AddrSpace.GLOBAL: dtype = dtypes.uint8
