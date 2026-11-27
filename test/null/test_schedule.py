@@ -2092,5 +2092,19 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.empty(4)
     check_schedule(a.clone(), 1, filter_sink=False)
 
+  def test_forward_call_outputs_reshaped(self):
+    from tinygrad.codegen.prepare import forward_call_outputs
+    # Reshaped ALLOC (CALL output) forwards target storage_base reshaped to base.shape
+    a_alloc = UOp.alloc((2, 3), dtypes.float, device="NULL")
+    a_tgt = UOp.new_buffer("NULL", 6, dtypes.float).reshape((6,))
+    a_out = forward_call_outputs(UOp.sink(a_tgt.store(a_alloc.after(UOp.sink().call(a_alloc)).reshape((6,)))))
+    self.assertEqual(a_out.src[0].shape, (6,))
+    self.assertNotIn(Ops.ALLOC, [u.op for u in a_out.toposort()])
+    # Non-contiguous SHRINK of ALLOC must not forward
+    s_alloc = UOp.alloc((2, 4), dtypes.float, device="NULL")
+    s_tgt = UOp.new_buffer("NULL", 6, dtypes.float).reshape((2, 3))
+    s_out = forward_call_outputs(UOp.sink(s_tgt.store(s_alloc.after(UOp.sink().call(s_alloc)).shrink(((0, 2), (0, 3))))))
+    self.assertIn(Ops.ALLOC, [u.op for u in s_out.toposort()])
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

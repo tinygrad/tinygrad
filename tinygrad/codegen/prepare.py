@@ -25,9 +25,9 @@ def forward_call_outputs(sink:UOp) -> UOp:
     # Forward the allocation, not just one view of it, so saved values and other aliases follow the same placement.
     key = base if base.op is Ops.ALLOC else src
     if key not in placed and (src.op is Ops.STAGE or target.has_buffer_identity()) and \
-       target.storage_base not in st.src[1].toposort():
-      if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
-        placed[key] = target.storage_base
+       (tb := target.storage_base) not in st.src[1].toposort():
+      if base.op is Ops.ALLOC and src.has_buffer_identity(after_ok=True) and base.numel() == tb.numel():
+        placed[key] = tb if base.shape == tb.shape else tb.reshape(base.shape)
       elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
       elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[key] = target
       if key in placed:
