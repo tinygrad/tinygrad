@@ -227,10 +227,16 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     ret.append(u)
   return UOp.usum(*ret) if changed else None
 
+def canonicalize_and(x:UOp) -> UOp|None:
+  if x.op_in_backward_slice_with_self(Ops.INDEX): return None
+  new = UOp.uand(*sorted(x.split_uop(Ops.AND), key=lambda u: (not u.ranges, tuple(sorted(r.arg for r in u.ranges)), u.tuplize)))
+  return new if new is not x else None
+
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
   (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(Ops.AND, dtype=dtypes.bool, name='x'), canonicalize_and),
 ])
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
