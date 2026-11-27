@@ -1,5 +1,4 @@
 import functools, time
-from dataclasses import replace
 from typing import TypeVar, Callable, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
 from tinygrad.uop.ops import UOp, Ops, GroupOp, graph_rewrite, PatternMatcher, UPat
@@ -29,11 +28,6 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
   # don't capture it as an input; only skip fresh buffers, not realized ones
   return {u.src[0].buf_uop for u in uret.backward_slice_with_self
           if u.op is Ops.STORE and u.src[1].base.is_invalid and not u.src[0].buf_uop.is_realized}
-
-def renumber_invalid_outputs(uret:UOp) -> UOp:
-  invalid = invalid_outputs(uret)
-  return uret.substitute({b:b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=i, buffer=None, bind_on_realize=False))
-                          for i,b in enumerate(x for x in uret.toposort() if x in invalid)})
 
 F = TypeVar('F', bound=Callable)
 @overload
@@ -73,7 +67,6 @@ def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
     # caller-owned storage left in the graph becomes implicit inputs
     num_explicit = len(call_uops)
     uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret), alloc_start), bottom_up=True, name="get_implicit_inputs")
-    uret = renumber_invalid_outputs(uret)
     if not allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op in {Ops.BUFFER, Ops.ALLOC}]
       if implicit_buffers:
