@@ -412,7 +412,7 @@ class TestConstFactor(unittest.TestCase):
   def test_const_factor_multiplication(self):
     # const_factor for a multiplication of constants
     uop = UOp.const(5) * UOp.const(7)
-    self.assertEqual(uop.const_factor(), 5)  # For multiplication, it's one of the factors
+    self.assertEqual(uop.const_factor(), 35)
 
   def test_const_factor_with_variable(self):
     # const_factor for an expression involving a variable
@@ -432,12 +432,18 @@ class TestConstFactor(unittest.TestCase):
     uop = x * 4
     self.assertEqual(uop.const_factor(), 4)  # Constant factor 4
 
-  @unittest.skip("broken")
   def test_const_factor_multiplication_of_consts_and_vars(self):
     # Multiplying constants and variables
     x = UOp.variable('x', 10, 20)
     uop = (x * 3) * 5
     self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
+
+  def test_const_factor_and_divides_mul_of_sums(self):
+    a, b = UOp.variable('a', 0, 10), UOp.variable('b', 0, 10)
+    uop = (a * 2 + 4) * (b * 3 + 6)
+    self.assertEqual(uop.const_factor(), 6)
+    self.assertIs((uop.divides(6)).simplify(), ((a + 2) * (b + 2)).simplify())
+    self.assertIs((uop % 6).simplify(), UOp.const(0))
 
 class TestDivides(unittest.TestCase):
   def test_divides_constant_exact(self):

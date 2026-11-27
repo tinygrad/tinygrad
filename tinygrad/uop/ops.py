@@ -1029,7 +1029,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     # TODO: for negatives it's not the largest
     if self.op is Ops.CONST: return self.val
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
-    if self.op is Ops.MUL: return self.src[0].val if self.src[0].op is Ops.CONST else self.src[1].val if self.src[1].op is Ops.CONST else 1
+    if self.op is Ops.MUL: return self.src[0].const_factor() * self.src[1].const_factor()
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
@@ -1038,6 +1038,8 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     if self.op is Ops.MUL:
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
+      if 1 < (g:=math.gcd(v, self.src[0].const_factor())) < abs(v) and \
+         (d0:=self.src[0].divides(g)) is not None and (d1:=self.src[1].divides(v//g)) is not None: return d0 * d1
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
     return (self.src[0], self.src[1].val) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
