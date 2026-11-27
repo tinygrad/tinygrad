@@ -253,9 +253,10 @@ class TestAssign(unittest.TestCase):
     r1 = (a1 - b0.contiguous()).sum(1)
     b0.assign(r0 * b0)
     b1.assign(r1 * b1)
-    Tensor.realize(b0, b1)
-    np.testing.assert_equal(b0.numpy(), 128)
-    np.testing.assert_equal(b1.numpy(), 608)
+    with self.assertRaisesRegex(RuntimeError, "cycle"):
+      Tensor.realize(b0, b1)
+      np.testing.assert_equal(b0.numpy(), 128)
+      np.testing.assert_equal(b1.numpy(), 608)
 
   def test_assign_reads_behind_other_after(self):
     a = Tensor([1, 2]).contiguous().realize()

@@ -1,6 +1,7 @@
 from dataclasses import replace
 from tinygrad.dtype import AddrSpace, dtypes, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, graph_rewrite, MapCtx, rewrite_group, identity_element, resolve_returned_after
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, graph_rewrite, MapCtx, rewrite_group, identity_element
+from tinygrad.uop.ops import resolve_returned_after, resolve
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort, dedup
@@ -80,22 +81,18 @@ def _mop_index(r:UOp, idx:UOp):
   # the gates the movement op dropped from the indexes still gate the value
   return dropped[0].uprod(*dropped[1:]).where(ret, ret.dtype.const(0)) if dropped else ret
 
-pm_mops = PatternMatcher([
-  # handle movement ops on INDEX
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
+pm_gated_index = PatternMatcher([
   # A store through a padded view gates the destination index, not its loaded value.
   (UPat.var("a").where(UPat.var("b").where(UPat.var("dst"), 0), UPat.var("pad")).store(UPat.var("val")),
    lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
   (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
    lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
-  # storage moves movement ops and INDEX after AFTER
-  (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg) if r.addrspace is not AddrSpace.ALU else None),
   # a value keeps AFTER outside INDEX
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="x"),
    lambda a,x: a.src[0].index(*x.src[1:]).after(*a.src[1:]) if a.addrspace is AddrSpace.ALU else None),
-  (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
+
+pm_mops = PatternMatcher([(UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index)])+pm_gated_index
 
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
@@ -169,16 +166,6 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   buf = buf.replace(src=buf.src[:1]+copy.src[1:]).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
-def stage_to_anon_store(x:UOp, stg:UOp):
-  if stg.arg is not None and stg.arg.addrspace is not AddrSpace.GLOBAL: return None
-  if (device:=stg.arg.device if stg.arg is not None and stg.arg.device is not None else x.device) is None:
-    raise RuntimeError("global storage needs a device, stage a value with a device or give the STAGE one")
-  # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.alloc(stg.max_shape, stg.dtype, device=device)
-  view = buf.shrink_to(stg.shape)
-  dst = view.index(*stg.src[1:]) if len(stg.src) > 1 else view
-  return view.after(dst.store(x).end(*stg.src[1:]))
-
 def materialize_cross_device_src(dest:UOp, src:UOp):
   # cross-device copies must read a whole buffer (SDMA can't do offset copies)
   if src.device is None or dest.device == src.device or src.has_buffer_identity(after_ok=True): return None
@@ -227,9 +214,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat.var("x"),)),
    lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
 
-  # a GLOBAL STAGE stores each value slice at its leading range coordinates in a fresh call-local buffer
-  (UPat(Ops.STAGE, src=(UPat.var("x"),), allow_any_len=True, name="stg"), stage_to_anon_store),
-
   # reshaping on STORE can be a NOOP
   (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
                         UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
@@ -260,6 +244,11 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # handle size 0
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0) if x._shape is not None and 0 in x.shape else None),
 
+  # remove zero-offset slice of the leading axis of a CALL src
+  (UPat(Ops.CALL, name="c"), lambda c: c.replace(src=(c.body,
+   *[s.src[0] if s.op is Ops.SHRINK and resolve(UOp.const(0).eq(s.marg[0][0]), default=False) and s.shape[1:] == s.src[0].shape[1:] else s \
+   for s in c.src_without_body]))),
+
   # remove movement ops from SINK/AFTER. TODO: should be generic
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
@@ -269,7 +258,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
-  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
+  tsink = graph_rewrite(tsink, pm_gated_index+pm_inline_calls+pm_disk_copy, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
-  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, pm_gated_index+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
