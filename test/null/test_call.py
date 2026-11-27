@@ -43,14 +43,6 @@ class TestCallShape(unittest.TestCase):
     self.assertTrue(shape[0].is_bound_var)
     self.assertEqual(shape[1], 4)
 
-  def test_call_shape_no_param_passthrough(self):
-    # a non-PARAM UOp shape element passes through unchanged
-    @function
-    def f(x:Tensor) -> Tensor: return x * 3
-    sz = UOp.variable("sz", 1, 8)
-    shape = f(Tensor.empty(8)[:sz.bind(5)]).shape
-    self.assertEqual(shape[0], sz.bind(5))
-
 class TestCallSchedule(unittest.TestCase):
   def test_precompile_schedule_cache_hit(self):
     """two instances of the same @function should produce identical scheduled function keys without aliasing their outputs"""

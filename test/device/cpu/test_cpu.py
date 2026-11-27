@@ -1,11 +1,12 @@
 import unittest, io
 from contextlib import redirect_stdout
 from tinygrad import Tensor, Device
-from tinygrad.helpers import Target
+from tinygrad.helpers import DEV, Target
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.renderer.cstyle import TCCRenderer
 from tinygrad.codegen import to_program
+if DEV.renderer == "LLVM": from test.runtime import test_ops
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
@@ -22,6 +23,11 @@ class TestCPU(unittest.TestCase):
           out = io.StringIO()
           with redirect_stdout(out): r.compiler.disassemble(lib)
           self.assertEqual("vmov" in out.getvalue(), expect_vmov, out.getvalue())
+
+class TestOps(unittest.TestCase):
+  @unittest.skipUnless(Device.DEFAULT == "CPU" and DEV.renderer == "LLVM", "DEVECTORIZE=0 only for LLVM")
+  def test_strided_conv2d_simple_vec(self):
+    test_ops.TestOps.test_strided_conv2d_simple(self)
 
 if __name__ == '__main__':
   unittest.main()

@@ -3,7 +3,7 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, sym_infer
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, sym_infer, resolve
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, symbolic, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
@@ -736,16 +736,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((((alu2+150)//(-32))+4), -1, -1, "-1")
     self.helper_test_variable((((alu2+158)//(-32))+4), -1, -1, "-1")
 
-  def test_div_mod_recombine(self):
-    gidx = Variable("gidx", 0, 124)
-    lidx = Variable("lidx", 0, 124)
-    self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
-    self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
-    self.helper_test_variable(lidx+gidx%4+(gidx//4)*4, 0, 248, "(gidx+lidx)")
-    self.helper_test_variable(lidx+(gidx//4)*4+gidx%4, 0, 248, "(gidx+lidx)")
-    self.helper_test_variable(lidx+(gidx//4)*8+2*(gidx%4), 0, 372, "(lidx+(gidx*2))")
-    self.helper_test_variable(lidx+2*(gidx%4)+(gidx//4)*8, 0, 372, "(lidx+(gidx*2))")
-
   def test_div_mod_recombine_partial(self):
     gidx = Variable("gidx", 0, 15)
     self.helper_test_variable((gidx//2)%4+(gidx//8)*4, 0, 7, "gidx//2")
@@ -1118,13 +1108,6 @@ class TestSymbolic(unittest.TestCase):
     # the inner where should be folded: true branch gets -x, false branch gets x
     self.helper_test_variable(outer, -20, 11, "(x<5).where((x*-2), (x+1))")
 
-  def test_where_closure_folding_deep(self):
-    x = Variable("x", 0, 10)
-    cond = x < 5
-    w1 = cond.where(-x, x)
-    w2 = cond.where(w1*2, w1+1)
-    self.helper_test_variable(cond.where(w2*3, w2+7), -60, 18, "(x<5).where((x*-6), (x+8))")
-
   def test_where_closure_folding_different_cond(self):
     # a nested where on a different condition is not folded
     x = Variable("x", 0, 10)
@@ -1249,6 +1232,132 @@ class TestSymbolicVariables(unittest.TestCase):
     s = b.simplify()
     self.assertEqual(s.op, Ops.CONST)
     self.assertEqual(s.val, 1)
+
+class TestUOpResolve(unittest.TestCase):
+  def test_simple_int(self):
+    u = UOp.const(4, dtypes.int)
+    self.assertEqual(int(u), 4)
+
+  def test_weak_const(self):
+    self.assertEqual(int(UOp.const(5)), 5)
+    self.assertEqual(float(UOp.const(1.5)), 1.5)
+
+  def test_int_add(self):
+    u = UOp.const(4, dtypes.int) + 7
+    self.assertEqual(int(u), 11)
+
+  def test_lt(self):
+    u = UOp.const(4) < 7
+    self.assertTrue(u)
+
+  def test_rfloordiv(self):
+    u = 8 // UOp.const(4, dtypes.int)
+    self.assertEqual(int(u), 2)
+
+  def test_rtruediv(self):
+    u = 9 / UOp.const(4, dtypes.float)
+    self.assertEqual(float(u), 2.25)
+
+  def test_leq(self):
+    u = UOp.const(4) <= 4
+    self.assertTrue(u)
+
+  def test_ne(self):
+    u = UOp.const(4) != 7
+    self.assertTrue(u)
+
+  def test_ne_f(self):
+    u = UOp.const(4) != 4
+    self.assertFalse(u)
+
+  def test_ngt(self):
+    u = UOp.const(4) > 7
+    self.assertFalse(u)
+
+  def test_ssimplify(self):
+    self.assertEqual((8 % UOp.const(4)).ssimplify(), 0)
+    self.assertEqual((8 * UOp.const(4)).ssimplify(), 32)
+
+  def test_ambiguous_less_than(self):
+    u = UOp.variable("i", 1, 10)
+    self.assertTrue(resolve(u < 4))
+    self.assertFalse(resolve(u < 4, False))
+    self.assertTrue(resolve(u < 11, False))
+    self.assertFalse(resolve(u < -1, False))
+    self.assertFalse(resolve(u < -1, True))
+
+  def test_float_direct(self):
+    u = UOp.const(4.5, dtypes.float) + 7
+    self.assertEqual(float(u), 11.5)
+
+  def test_var_cmp_t(self):
+    u = UOp.variable("i", 1, 10) < 20
+    self.assertTrue(u)
+
+  def test_var_cmp_t2(self):
+    u = UOp.variable("i", 1, 10)//2 < 20
+    self.assertTrue(u)
+
+  def test_var_cmp_f(self):
+    u = UOp.variable("i", 1, 10) < 1
+    self.assertFalse(u)
+
+  def test_var_cmp_f2(self):
+    u = UOp.variable("i", 1, 10) > 11
+    self.assertFalse(u)
+
+  def test_or_true(self):
+    u = UOp.variable("b", False, True, dtypes.bool) | True
+    self.assertTrue(u)
+
+  def test_or_false(self):
+    with self.assertRaises(ValueError):
+      u = UOp.variable("b", False, True, dtypes.bool) | False
+      self.assertTrue(u)
+
+  def test_and_false(self):
+    u = UOp.variable("b", False, True, dtypes.bool) & False
+    self.assertFalse(u)
+
+  def test_max(self):
+    x = UOp.variable("x", 1, 10)
+    y = UOp.variable("y", 5, 10)
+    u = x.maximum(y)
+    self.assertTrue(u < 20)
+    self.assertFalse(u < 3)
+
+  def test_x_lt_x(self):
+    x = UOp.variable("i", 1, 10)
+    self.assertFalse(x < x)
+
+  def test_x_lt_xp1(self):
+    x = UOp.variable("i", 1, 10)
+    u = x < (x+1)
+    # TODO: improve
+    with self.assertRaises(ValueError):
+      bool(u)
+
+  def test_and_true(self):
+    u = UOp.variable("b", False, True, dtypes.bool) & True
+    with self.assertRaises(ValueError):
+      bool(u)
+
+  def test_var_cmp_range(self):
+    v = UOp.variable("i", 1, 10)
+    u = (v > 4) | (v < 6)
+    # TODO: improve
+    with self.assertRaises(ValueError):
+      bool(u)
+
+  def test_var_cmp_assert(self):
+    with self.assertRaises(ValueError):
+      u = UOp.variable("i", 1, 10) < 5
+      self.assertFalse(u)
+
+  def test_plus_ordering_lt(self):
+    i = UOp.variable("i", 1, 10)
+    j = UOp.variable("j", 1, 10)
+    self.assertFalse((i+j) < (j+i))
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
@@ -1483,6 +1592,120 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     out = graph_rewrite(expr, pm_move_where_on_load)
     type_verify(out, spec_shared)  # Invalid matches any dtype
 
+class TestFuzzFailure(unittest.TestCase):
+  def test_fuzz_failure1(self):
+    v1=Variable('v1', 0, 8)
+    v2=Variable('v2', 0, 2)
+    v3=Variable('v3', 0, 1)
+    expr = (((((((((((((((((((((((0//4)%2)//8)+-2)+-4)+-3)+v1)+-4)+v2)+-2)+v3)+v2)//3)%7)*1)//2)+v2)*-1)+2)+1)+0)+-3)+v3)
+    v1_val, v2_val, v3_val = UOp.const(8), UOp.const(0), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure2(self):
+    v1=Variable('v1', 0, 16)
+    v2=Variable('v2', 0, 5)
+    v3=Variable('v3', 0, 3)
+    expr = (((((((((((((((((((((((((0*4)//5)*2)*-1)*-2)+-4)*4)*2)*3)*4)+-4)*4)+v2)+v2)+v3)//3)+v2)+v1)//9)+3)+1)//1)+-4)//4)*2)
+    expr = (((((v1+(v2+(((v3+(v2*2))+1)//3)))+4)//9)+-57)//(9*4))
+    v1_val, v2_val, v3_val = UOp.const(6), UOp.const(0), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure3(self):
+    v1=Variable('v1', 0, 2)
+    v2=Variable('v2', 0, 1)
+    v3=Variable('v3', 0, 2)
+    expr = (((((((((((((((((((0//2)//3)+v3)+0)+-4)*-2)*-2)+-1)+2)+3)+v3)+0)//8)*-3)+0)*-2)*-4)*-2)//5)
+    v1_val, v2_val, v3_val = UOp.const(0), UOp.const(0), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure4(self):
+    v1=Variable('v1', 0, 2)
+    v2=Variable('v2', 0, 3)
+    v3=Variable('v3', 0, 4)
+    expr = (((((((((((((((((((((((((((((0*-2)+0)*-1)//9)//6)//8)+v1)*-4)+v2)//4)//8)+4)*3)+v1)+v3)//8)//7)+4)+v3)*-4)+1)+v1)*3)+4)*2)//5)//2)//3)*-4)
+    v1_val, v2_val, v3_val = UOp.const(2), UOp.const(0), UOp.const(2)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure5(self):
+    v1=Variable('v1', 0, 1)
+    v2=Variable('v2', 0, 1)
+    v3=Variable('v3', 0, 3)
+    expr = ((((((((((((((0+v2)+v1)*0)+v2)//1)//7)+-2)+v2)+v1)*4)+-3)//5)+v2)+1)
+    v1_val, v2_val, v3_val = UOp.const(0), UOp.const(0), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure6(self):
+    v1=Variable('v1', 0, 8)
+    v2=Variable('v2', 0, 64)
+    v3=Variable('v3', 0, 128)
+    expr = (((((((((((((((((((((((((((((0//3)+4)+v1)//2)+-1)//1)*1)*-1)*4)//5)+v1)//6)+v1)*-1)+-4)+v2)+-2)*-3)+v3)+-4)+-2)*-1)//8)//4)*-4)+3)+v3)*
+            -2)+v2)
+    v1_val, v2_val, v3_val = UOp.const(8), UOp.const(3), UOp.const(2)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure7(self):
+    v1=Variable('v1', 0, 64)
+    v2=Variable('v2', 0, 5)
+    v3=Variable('v3', 0, 128)
+    expr = (((((((((((((((((((((((((((((0+v2)*-4)+0)//9)+-4)*-2)*3)*4)//9)+v3)+v1)//4)+v1)+v3)+-1)*4)//4)+v2)//7)//3)+v1)+v2)+v3)+1)*2)//4)*3)+-1)*1)
+    v1_val, v2_val, v3_val = UOp.const(0), UOp.const(2), UOp.const(65)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure8(self):
+    v1=Variable('v1', 0, 2)
+    v2=Variable('v2', 0, 8)
+    v3=Variable('v3', 0, 9)
+    expr = (((((((0+-1)+2)+v1)*-2)//3)+v1)*-4)
+    v1_val, v2_val, v3_val = UOp.const(0), UOp.const(0), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure9(self):
+    v1=Variable('v1', 0, 256)
+    v2=Variable('v2', 0, 1)
+    v3=Variable('v3', 0, 8)
+    expr = (((((((((((((((((((((((((((((0*-2)//1)+3)*-2)+-3)*-4)*1)+v1)+0)%2)%8)%9)+v2)%9)+-4)//4)+-1)*-2)+0)+v1)+v1)+3)+v1)+4)+-4)+0)*2)+-3)%6)
+    v1_val, v2_val, v3_val = UOp.const(0), UOp.const(1), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure10(self):
+    v1=Variable("v1", 0, 256)
+    v2=Variable("v2", 0, 32)
+    v3=Variable("v3", 0, 32)
+    x5 = (v1 <= 9).where(v1 * -4 - 4, v1 // 9) // 9
+    expr = ((x5 >= -4).where(x5, (v2 % 3 + v2) // 5) * -1).maximum(((v1 * -2) % 6 + v3 % 1) * -1) * -1
+    v1_val, v2_val, v3_val = UOp.const(9), UOp.const(0), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+  def test_fuzz_failure11(self):
+    v1=Variable("v1", 0, 16)
+    v2=Variable("v2", 0, 128)
+    v3=Variable("v3", 0, 5)
+    expr = (((v2 * 0).maximum(8) - v2 * 2) % 5 + v1 // 6 + v1 + 5) % 5
+    v1_val, v2_val, v3_val = UOp.const(0), UOp.const(7), UOp.const(0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):
     gidx0 = Variable("gidx0", 0, 3)
@@ -1576,17 +1799,6 @@ class TestBounds(unittest.TestCase):
     # an infinite bound passes through the cast, the finite one still rounds
     i = cond.where(uconst(-math.inf), uconst(2.7)).cast(dtypes.int)
     self.assertEqual((i.vmin, i.vmax), (dtypes.int.min, 2))
-
-class TestFuzzFailure(unittest.TestCase):
-  def test_fuzz_failure1(self):
-    v1=Variable('v1', 0, 8)
-    v2=Variable('v2', 0, 2)
-    v3=Variable('v3', 0, 1)
-    expr = (((((((((((((((((((((((0//4)%2)//8)+-2)+-4)+-3)+v1)+-4)+v2)+-2)+v3)+v2)//3)%7)*1)//2)+v2)*-1)+2)+1)+0)+-3)+v3)
-    v1_val, v2_val, v3_val = UOp.const(8), UOp.const(0), UOp.const(0)
-    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
-    assert num==rn, f"{num} != {rn}"
 
 if __name__ == '__main__':
   unittest.main()

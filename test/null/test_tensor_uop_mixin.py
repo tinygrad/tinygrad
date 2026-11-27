@@ -93,7 +93,6 @@ class TestTensorUOpGetitem(unittest.TestCase):
   def test_slice_empty(self):    _check(self, _t(6), lambda x: x[3:1])
   def test_slice_oob_stop(self): _check(self, _t(6), lambda x: x[0:100])
 
-  # ---- single int (reduces a dim) ----
   def test_int_positive(self): _check(self, _t(8), lambda x: x[3])
   def test_int_negative(self): _check(self, _t(8), lambda x: x[-1])
 
@@ -258,7 +257,6 @@ class TestTensorUOpGather(unittest.TestCase):
   def test_gather_1d(self):  self._check(_t(5), 0, Tensor([2, 1, 0, 1, 2], dtype=dtypes.int32))
   def test_gather_dim0(self): self._check(_t(3, 4), 0, Tensor([[0, 1, 2, 0], [1, 2, 0, 1], [2, 0, 1, 2]], dtype=dtypes.int32))
   def test_gather_dim1(self): self._check(_t(3, 4), 1, Tensor([[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1]], dtype=dtypes.int32))
-
 class TestTensorUOpInterpolate(unittest.TestCase):
   def _check(self, t, mode):
     self.assertIs(t.interpolate(size=(2, 2), mode=mode).uop, t.uop.interpolate(size=(2, 2), mode=mode))

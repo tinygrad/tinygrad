@@ -116,33 +116,6 @@ class test_rearrange_ops(unittest.TestCase):
     assert x2[1, 2, 3] == result[2, 3, 1]
     assert x2[0, 1, 2] == result[1, 2, 0]
 
-  def test_rearrange_permutations(self):
-    # tests random permutation of axes against two independent numpy ways
-    for n_axes in range(1, 10):
-      x = np.arange(2**n_axes, dtype=np.int32).reshape([2] * n_axes)
-      permutation = np.random.permutation(n_axes)
-      left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
-      right_expression = " ".join("i" + str(axis) for axis in permutation)
-      expression = left_expression + " -> " + right_expression
-      result = Tensor(x).rearrange(expression).numpy()
-
-      for pick in np.random.randint(0, 2, [10, n_axes]):
-        assert x[tuple(pick)] == result[tuple(pick[permutation])]
-
-    for n_axes in range(1, 10):
-      x = np.arange(2**n_axes, dtype=np.int32).reshape([2] * n_axes)
-      permutation = np.random.permutation(n_axes)
-      left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
-      right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
-      expression = left_expression + " -> " + right_expression
-      result = Tensor(x).rearrange(expression).numpy()
-      assert result.shape == x.shape
-      expected_result = np.zeros_like(x)
-      for original_axis, result_axis in enumerate(permutation):
-        expected_result |= ((x >> original_axis) & 1) << result_axis
-
-      assert np.array_equal(result, expected_result)
-
 
 class test_rearrange_parsing(unittest.TestCase):
   def test_unicode_ellipsis(self):

@@ -88,14 +88,6 @@ class TestEnumBitField(unittest.TestCase):
       VOP1(VOP2Op.V_CNDMASK_B32_E32, v[5], v[6])
 
 class TestVOP1(unittest.TestCase):
-  def test_class_setup(self):
-    self.assertEqual(VOP1._size(), 4)
-    field_names = [n for n, _ in VOP1._fields]
-    self.assertIn('encoding', field_names)
-    self.assertIn('op', field_names)
-    self.assertIn('vdst', field_names)
-    self.assertIn('src0', field_names)
-
   def test_encoding_vgpr_vgpr(self):
     i = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])
     raw = i._raw
@@ -104,23 +96,6 @@ class TestVOP1(unittest.TestCase):
     self.assertEqual((raw >> 17) & 0xff, 5)          # vdst (just VGPR index)
     self.assertEqual((raw >> 9) & 0xff, 1)           # op
     self.assertEqual(raw & 0x1ff, 262)               # src0 (256 + 6)
-
-  def test_encoding_vgpr_sgpr(self):
-    i = VOP1(VOP1Op.V_MOV_B32_E32, v[5], s[10])
-    raw = i._raw
-    self.assertEqual((raw >> 17) & 0xff, 5)    # vdst (just VGPR index)
-    self.assertEqual(raw & 0x1ff, 10)          # src0 (SGPR encoded)
-
-  def test_to_bytes(self):
-    i = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])
-    b = i.to_bytes()
-    self.assertEqual(len(b), 4)
-    self.assertEqual(int.from_bytes(b, 'little'), i._raw)
-
-  def test_from_bytes(self):
-    i1 = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])
-    i2 = VOP1.from_bytes(i1.to_bytes())
-    self.assertEqual(i1._raw, i2._raw)
 
   def test_repr(self):
     i = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])

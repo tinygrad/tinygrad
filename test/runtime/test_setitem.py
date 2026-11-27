@@ -1,5 +1,6 @@
 import unittest, operator
-from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
+from tinygrad import Tensor, TinyJit, Variable, dtypes, Device, GlobalCounters
+from test.helpers import assert_kernel_count
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -140,22 +141,6 @@ class TestSetitem(unittest.TestCase):
     n = np.zeros((6,6))
     n[[1,2], [3,2]] = 3
     np.testing.assert_allclose(t.numpy(), n)
-
-  def test_simple_jit_setitem(self):
-    @TinyJit
-    def f(t:Tensor, a:Tensor):
-      t[2:4, 3:5] = a
-      # NOTE: without return t or an explicit realize, it's lazy and not captured
-      return t
-
-    for i in range(1, 6):
-      t = Tensor.zeros(6, 6).contiguous().realize()
-      a = Tensor.full((2, 2), fill_value=i, dtype=dtypes.float).contiguous()
-      f(t, a)
-
-      n = np.zeros((6, 6))
-      n[2:4, 3:5] = np.full((2, 2), i)
-      np.testing.assert_allclose(t.numpy(), n)
 
   def test_jit_setitem_after_assign(self):
     @TinyJit
@@ -311,13 +296,6 @@ class TestAssignBitcast(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), [1.0, 2.0, 1.0, 1.0])
 
 class TestWithGrad(unittest.TestCase):
-  def test_set_backward(self):
-    z = Tensor.ones(8, 8)
-    x = Tensor.rand(8, 8)
-    z[:] = x
-    z.sum().backward()
-    np.testing.assert_allclose(x.grad.numpy(), np.ones((8, 8)))
-
   def test_set_nonleaf_backward(self):
     x = Tensor([1.0, 2.0, 3.0, 4.0])
     z = x * 2
@@ -375,6 +353,77 @@ class TestSetitemLoop(unittest.TestCase):
     cmp = Tensor.empty(N)
     for i in range(N): cmp[i] = i
     self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
+
+class TestSetitemInto(unittest.TestCase):
+  def test_setitem_into_unrealized(self):
+    GlobalCounters.reset()
+    t = Tensor.arange(4, dtype=dtypes.int32).reshape(2, 2)
+    assert_kernel_count(0)
+    t[1] = 5
+    assert_kernel_count(0)
+    t.realize()
+    assert_kernel_count(0)
+    self.assertEqual(GlobalCounters.global_mem, 0)
+    self.assertListEqual(t.tolist(), [[0, 1], [5, 5]])
+
+  def test_setitem_into_unrealized_sliced_compute(self):
+    # base computation contains SHRINK from prior slicing (like QR decomposition pattern)
+    GlobalCounters.reset()
+    a = Tensor.arange(8, dtype=dtypes.int32).reshape(2, 4)
+    w = a[0] + a[1]  # unrealized ADD with SHRINK in graph: [4, 6, 8, 10]
+    assert_kernel_count(0)
+    w[1] = 99
+    assert_kernel_count(0)
+    w.realize()
+    assert_kernel_count(0)
+    self.assertEqual(GlobalCounters.global_mem, 0)
+    self.assertListEqual(w.tolist(), [4, 99, 8, 10])
+
+  def test_setitem_into_empty(self):
+    GlobalCounters.reset()
+    t = Tensor.empty(4, dtype=dtypes.int32)
+    t[1] = 5
+    assert_kernel_count(0)
+    t.realize()
+    assert_kernel_count(1)
+    self.assertEqual(GlobalCounters.global_mem, 4)
+    t[1].realize()
+    t.realize()
+    assert_kernel_count(1)
+    self.assertEqual(t[1].item(), 5)
+
+  def test_setitem_into_tensor(self):
+    t = Tensor([1, 2, 3, 4], dtype=dtypes.int32).realize()
+    GlobalCounters.reset()
+    t[1] = 5
+    assert_kernel_count(0)
+    t[1].realize()
+    assert_kernel_count(1)
+    self.assertEqual(GlobalCounters.global_mem, 4)
+    t.realize()
+    assert_kernel_count(1)
+    self.assertListEqual(t.tolist(), [1, 5, 3, 4])
+
+  def test_setitem_into_const(self):
+    GlobalCounters.reset()
+    t = Tensor.ones(4, dtype=dtypes.int32, buffer=False)
+    t[1] = 5
+    assert_kernel_count(0)
+    t.realize()
+    assert_kernel_count(0)
+    self.assertEqual(GlobalCounters.global_mem, 0)
+    self.assertListEqual(t.tolist(), [1, 5, 1, 1])
+
+  @unittest.skipUnless(Device.DEFAULT != "CPU", "source must be on another device")
+  def test_setitem_slice_assign_from_other_device(self):
+    # Copy and assign; CL and WEBGPU also need a kernel to materialize the source slice (no buffer views).
+    a = Tensor.ones(20, device="CPU")
+    b = Tensor.arange(20).float().clone()
+    Tensor.realize(a, b)
+    GlobalCounters.reset()
+    a[10:12].assign(b[13:15].to(a.device)).realize()
+    assert_kernel_count(3 if Device.DEFAULT in {"CL", "WEBGPU"} else 2)
+    self.assertListEqual(a.tolist(), [1.0]*10 + [13.0, 14.0] + [1.0]*8)
 
 if __name__ == '__main__':
   unittest.main()

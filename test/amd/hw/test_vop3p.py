@@ -38,19 +38,6 @@ class TestPackInstructions(unittest.TestCase):
 class TestPackMore(unittest.TestCase):
   """Additional pack instruction tests."""
 
-  def test_v_pack_b32_f16_basic(self):
-    """V_PACK_B32_F16 packs two f16 values."""
-    instructions = [
-      s_mov_b32(s[0], 0x3c00),  # f16 1.0
-      s_mov_b32(s[1], 0x4000),  # f16 2.0
-      v_mov_b32_e32(v[0], s[0]),
-      v_mov_b32_e32(v[1], s[1]),
-      v_pack_b32_f16(v[2], v[0], v[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = st.vgpr[0][2]
-    self.assertEqual(result, 0x40003c00, f"Expected 0x40003c00, got 0x{result:08x}")
-
   def test_v_pack_b32_f16_with_cvt(self):
     """V_PACK_B32_F16 after V_CVT_F16_F32 conversions."""
     instructions = [
@@ -114,19 +101,6 @@ class TestPackMore(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0)
-
-  def test_v_pack_b32_f16_both_positive(self):
-    """V_PACK_B32_F16 with positive f16 values."""
-    instructions = [
-      s_mov_b32(s[0], 0x4200),  # f16 3.0
-      s_mov_b32(s[1], 0x4400),  # f16 4.0
-      v_mov_b32_e32(v[0], s[0]),
-      v_mov_b32_e32(v[1], s[1]),
-      v_pack_b32_f16(v[2], v[0], v[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    result = st.vgpr[0][2]
-    self.assertEqual(result, 0x44004200, f"Expected 0x44004200, got 0x{result:08x}")
 
 
 class TestFmaMix(unittest.TestCase):

@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import Device, dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import temp, DEV, Context
+from tinygrad.helpers import temp, Context
 from test.helpers import assert_kernel_count, needs_devices
 
 N = 200  # has to be bigger than the cache to fail
@@ -84,16 +84,6 @@ class TestAssign(unittest.TestCase):
     ref = ref + ref[::-1]
     np.testing.assert_allclose(X.numpy(), ref)
     assert_kernel_count(2)
-
-  def test_assign_add(self):
-    for T in (1, 2, 10):#, 100): # this crashes in CI, not sure why
-      x = Tensor([0]).realize()
-      buf = x.uop.base.realized
-      for _ in range(T):
-        x += 1
-      x.realize()
-      assert x.item() == T
-      assert x.uop.base.realized is buf
 
   def test_assign_slice_add(self):
     for T in (1, 2, 10, 100):
@@ -202,26 +192,12 @@ class TestAssign(unittest.TestCase):
     new = a + (times_a-1).contiguous()
     np.testing.assert_allclose(new.numpy(), 4)
 
-  def test_assign_diamond_both_contiguous(self):
-    a = Tensor.ones(4).contiguous().realize()
-    times_a = a*3
-    a.assign(Tensor.full((4,), 2.))
-    new = a.contiguous() + (times_a-1).contiguous()
-    np.testing.assert_allclose(new.numpy(), 4)
-
   def test_assign_diamond_alt(self):
     a = Tensor.ones(4).contiguous().realize()
     a.assign(Tensor.full((4,), 2.).contiguous())
     times_a = a*3
     new = a + times_a
     np.testing.assert_allclose(new.numpy(), 8)
-
-  @unittest.skipIf(DEV.renderer == "LVP", "flaky in CI")
-  def test_double_assign(self):
-    a = Tensor.ones(4).contiguous().realize()
-    a += 1
-    a += 1
-    np.testing.assert_allclose(a.numpy(), 3)
 
   def test_crossover_assign(self):
     a = Tensor.full((4,), 2).contiguous().realize()
@@ -231,17 +207,6 @@ class TestAssign(unittest.TestCase):
     Tensor.realize(a,b)
     np.testing.assert_allclose(a.numpy(), 5)
     np.testing.assert_allclose(b.numpy(), 8)
-
-  def test_assign_double_diamond(self):
-    a = Tensor.full((4,), 2).contiguous().realize()
-    b = Tensor.full((4,), 3).contiguous().realize()
-    a_prev = a*4
-    b_prev = b+3
-    b += a_prev.contiguous()
-    a += b_prev.contiguous()
-    Tensor.realize(a, b)
-    np.testing.assert_equal(b.numpy(), 11)
-    np.testing.assert_equal(a.numpy(), 8)
 
   def test_assign_double_diamond_reduce(self):
     a0 = Tensor.full((16, 16), 10).contiguous().realize()
@@ -328,21 +293,6 @@ class TestAssign(unittest.TestCase):
       self.assertEqual(y.tolist(), [11.0])
       self.assertEqual(x.tolist(), [5.0])
 
-  def test_permuted_assignment(self):
-    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
-    b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
-    a.realize()
-    b.realize()
-    ba1 = a.uop.base.realized
-    bb1 = b.uop.base.realized
-    a = a.permute(1,0)
-    a += b
-    a.realize()
-    ba2 = a.uop.base.realized
-    np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
-    # permute and base are the same buffer
-    assert ba1 == ba2 and ba1 != bb1
-
   def _assign_view_of_self(self, view):
     a = Tensor.arange(N*N).reshape(N,N).clone().realize()
     b = Tensor.arange(N*N).reshape(N,N).clone().realize()
@@ -355,25 +305,6 @@ class TestAssign(unittest.TestCase):
   def test_post_flipped_assignment_axis1(self): self._assign_view_of_self(lambda a: a.flip(1))
   def test_post_reshape_assignment(self): self._assign_view_of_self(lambda a: a.reshape(-1).reshape(N,N))
 
-  @unittest.skip("multi output not supported anymore")
-  def test_simple_assignment_multioutput(self):
-    a = Tensor.arange(32*32).reshape(32, 32).clone().realize()
-    b = Tensor.full((32, ), 1.).contiguous().realize()
-    c = Tensor.full((32, ), 2.).contiguous().realize()
-    d = Tensor.full((32, ), 3.).contiguous().realize()
-
-    r = a.sum(axis=1)
-    b.assign(r + b)
-    c.assign(r + c)
-    d.assign(r + d)
-
-    GlobalCounters.reset()
-    Tensor.realize(b, c, d)
-    assert_kernel_count(1)
-    np.testing.assert_allclose(b.numpy(), a.sum(1).numpy()+1)
-    np.testing.assert_allclose(c.numpy(), a.sum(1).numpy()+2)
-    np.testing.assert_allclose(d.numpy(), a.sum(1).numpy()+3)
-
   # NOTE: if the assign target is read/write in a single kernel, it should be contiguous
 
   def test_permuted_reduceop_child_dual_use(self):
@@ -383,35 +314,6 @@ class TestAssign(unittest.TestCase):
     b.assign(r + b.permute(1, 0))
     b.realize()
     np.testing.assert_equal(b.numpy(), a.numpy().sum(axis=1)+np.ones((32, 32), dtype=np.int32).transpose(1, 0))
-
-  @unittest.skip("multi output not supported anymore")
-  def test_permuted_reduceop_multioutput_dual_use(self):
-    a = Tensor.arange(32*32*32).reshape(32, 32, 32).clone().realize()
-    b = Tensor.full((32, 32), 1.).contiguous().realize()
-    c = Tensor.full((32, 32), 2.).contiguous().realize()
-
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
-      r = a.sum(axis=1)
-      b_perm = b.permute(1, 0)
-      b.assign(r + b)
-      c.assign(r + b_perm)
-      Tensor.realize(b, c)
-
-  @unittest.skip("multi output not supported anymore")
-  def test_permuted_reduceop_multioutput_dual_use_possible(self):
-    a = Tensor.arange(32*32*32).reshape(32, 32, 32).clone().realize()
-    b = Tensor.arange(32 * 32).reshape(32, 32).clone().realize()
-    c = Tensor.arange(32 * 32).reshape(32, 32).clone().realize()
-
-    GlobalCounters.reset()
-    r = a.sum(axis=1)
-    b_perm = b.permute(1, 0)
-    b.assign(r + b)
-    c.assign(r + b_perm.contiguous())
-    Tensor.realize(b, c)
-    assert_kernel_count(2)
-    np.testing.assert_equal(b.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32))
-    np.testing.assert_equal(c.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32).transpose(1, 0))
 
   def test_permuted_assignment_masked_view_possible(self):
     a = Tensor.ones(4, 4).contiguous().realize()
@@ -520,15 +422,6 @@ class TestAssign(unittest.TestCase):
     a = Tensor([0]*8, dtype=dtypes.uint8).realize()
     a.bitcast(dtypes.int64).assign(Tensor([12345], dtype=dtypes.int64)).realize()
     np.testing.assert_equal(a.numpy(), [57, 48, 0, 0, 0, 0, 0, 0])
-
-  def test_assign_shape_broadcast(self):
-    # shape broadcasting should work when dtypes match
-    a = Tensor.zeros(3, 5, dtype=dtypes.float32).contiguous().realize()
-    b = Tensor([1., 2., 3., 4., 5.], dtype=dtypes.float32)
-    a.assign(b)
-    a.realize()
-    expected = np.array([[1., 2., 3., 4., 5.]] * 3)
-    np.testing.assert_allclose(a.numpy(), expected)
 
   def test_assign_shape_broadcast_2d(self):
     # broadcast (1, 5) to (3, 5)

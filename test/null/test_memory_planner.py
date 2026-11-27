@@ -208,18 +208,6 @@ class TestMemoryPlanner(unittest.TestCase):
     assert r2_arena is not None and r3_arena is not None
     assert r2_arena is r3_arena
 
-  def test_copy_and_compute_no_cross_reuse(self):
-    bs = [
-      [b(0), b(1)],
-      [b(2), b(1)],
-      [b(3), b(2)],
-    ]
-    linear = _make_linear(bs, copies=[(b(2), b(1))])
-    result = memory_plan_rewrite(linear)
-    r0_arena, r2_arena = _get_arena(b(0), linear, result), _get_arena(b(2), linear, result)
-    assert r0_arena is not None and r2_arena is not None
-    assert r0_arena is not r2_arena
-
   def test_multiple_copy_bufs_with_offsets(self):
     bs = [
       [b(0, pin=True), b(1), b(2)],

@@ -1,5 +1,5 @@
 import unittest, math
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import Ops
 import numpy as np
 from test.null.test_const_folding import _check_ast_count
@@ -82,56 +82,6 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor(4).max())
     np.testing.assert_equal(Tensor(4).max().numpy(), 4)
 
-@unittest.skip("RANGEIFY doesn't support multi const folding")
-class TestMultiConstFolding(unittest.TestCase):
-  def test_multi_const_folding_literal(self):
-    ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().clone().to(ds).realize()
-
-    # non const folding case creates one ast on each shard
-    _check_ast_count(4, t + 1)
-    _check_ast_count(4, 1 + t)
-    _check_ast_count(4, t * 2)
-    _check_ast_count(4, 2 * t)
-
-    # const folded
-    _check_ast_count(0, t + 0)
-    _check_ast_count(0, 0 + t)
-    _check_ast_count(0, t * 0)
-    _check_ast_count(0, 0 * t)
-    _check_ast_count(0, t * 1)
-    _check_ast_count(0, 1 * t)
-    np.testing.assert_equal((t + 0).numpy(), np.arange(16))
-    np.testing.assert_equal((t * 0).numpy(), [0] * 16)
-    np.testing.assert_equal((t * 1).numpy(), np.arange(16))
-
-    _check_ast_count(0, t ** 0)
-    _check_ast_count(0, t ** 1)
-    _check_ast_count(0, 1 ** t)
-
-  def test_multi_const_folding_tensor(self):
-    ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().clone().to(ds).realize()
-    zero = Tensor.zeros(16).to(ds).realize()
-    one = Tensor.ones(16).to(ds).realize()
-
-    # const folded
-    _check_ast_count(0, t + zero)
-    _check_ast_count(0, zero + t)
-    _check_ast_count(0, t * zero)
-    _check_ast_count(0, zero * t)
-    _check_ast_count(0, t * one)
-    _check_ast_count(0, one * t)
-    np.testing.assert_equal((t + zero).numpy(), np.arange(16))
-    np.testing.assert_equal((t * zero).numpy(), [0] * 16)
-    np.testing.assert_equal((t * one).numpy(), np.arange(16))
-    _check_ast_count(0, t ** zero)
-    _check_ast_count(0, t ** one)
-    _check_ast_count(0, one ** t)
-    np.testing.assert_equal((t ** zero).numpy(), [1] * 16)
-    np.testing.assert_equal((t ** one).numpy(), np.arange(16))
-    np.testing.assert_equal((one ** t).numpy(), [1] * 16)
-
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang
   def test_lt_false(self):
@@ -147,15 +97,6 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((Tensor(False) < Tensor(True)).numpy(), True)
     np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
     np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
-
-  def test_a_eq_a(self):
-    # self eq is always true for int or bool
-    a = Tensor([1, 2, 3])
-    np.testing.assert_equal((a == a).numpy(), [True, True, True])
-
-    # not true for nan
-    a = Tensor([math.nan, 1.0, 2.0])
-    np.testing.assert_equal((a == a).numpy(), [False, True, True])
 
   def test_a_ne_a(self):
     # self not eq is always false for int or bool

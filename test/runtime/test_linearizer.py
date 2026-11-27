@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, KernelInfo
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.codegen import to_program
-from tinygrad.helpers import Context, dedup, TC_SELECT, TC_OPT, DEV
+from tinygrad.helpers import dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -40,14 +40,6 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), ta)
     np.testing.assert_equal(b.numpy(), tb)
 
-  @unittest.skip("TODO: some backends insert more casts")
-  def test_cast_there_and_back(self):
-    tst = Tensor.ones(16, dtype=dtypes.int).contiguous().realize()
-    out = tst.neg().cast(dtypes.char).cast(dtypes.int).cast(dtypes.char) * 2
-    ast = helper_linearizer_opt(out)
-    uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 1)
-
   @unittest.expectedFailure
   def test_cast_back_and_there(self):
     tst = Tensor.ones(16, dtype=dtypes.int).contiguous().realize()
@@ -80,14 +72,6 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
 
-  def test_three_nested_range(self):
-    a = Tensor.randn(2, ).realize()
-    out = a.reshape(2, 1).expand(2, 3).expand(2, 2, 3).sum()
-    ast = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])
-    uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    assert len(ranges) == 1 # NOTE: it collapses now
-
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
     out = a.reshape(2, 1).pad(((1, 1), (1, 1)), value=2).sum()
@@ -109,15 +93,6 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # LOAD -> RANGE -> LOAD -> STORE
     assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD and x.src[0].buf_uop.arg.name != "args"]) == 1
-
-  def test_range_outer_op_before_phi_nested_range(self):
-    a = Tensor.randn(2, ).realize()
-    b = Tensor.randn(1, 1).realize()
-    out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
-    ast = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()])
-    uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    assert len(ranges) == 1 # NOTE: it collapses now
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
@@ -189,38 +164,6 @@ class TestLinearizer(unittest.TestCase):
     #helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255).clone(), max_ops=2)
 
-  @unittest.skip("test implicitly depends on certain optimizations")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
-  def test_grouped_store_phis(self):
-    """
-    float4 acc0 = float4(0.0,0.0,0.0,0.0);
-    {
-      acc0 = // ...
-    }
-    *((device float4*)(data0+alu2)) = float4(acc0.x,acc0.y,acc0.z,acc0.w);
-    simplifies to:
-    *((device float4*)(data0+alu2)) = acc0;
-    """
-    x, y = Tensor.rand(64,64), Tensor.rand(64,64)
-    out = x.matmul(y)
-    with Context(TC=0):
-      ast = helper_linearizer_opt(out)
-      uops = tuple(to_program(ast, renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    # check that the float4 cast collapses
-    store_vals = [u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
-    for val in store_vals:
-      assert val.dtype == dtypes.float # and val.op is not Ops.VECTORIZE
-
-  @unittest.skip("test implicitly depends on certain optimizations")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  def test_grouped_store_values(self):
-    x = Tensor.randn((4,3,6,6)).realize()
-    out = x.flip((0,1)).contiguous()
-    ast = helper_linearizer_opt(out)
-    store_val = [u.src[1] for u in tuple(to_program(ast, renderer=Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.STORE][0]
-    assert store_val.dtype == dtypes.float and store_val.op is not Ops.STACK
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -244,25 +187,6 @@ class TestLinearizer(unittest.TestCase):
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
     assert len([u for u in uops if u.op is Ops.IF])
-
-  @unittest.skip("test implicitly depends on certain optimizations")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
-  def test_grouped_store_local_only(self):
-    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
-    r = (x@y).relu()
-    ast = helper_linearizer_opt(r)
-    uops = tuple(to_program(ast, renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    stores = [u for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
-
-    # the float4 value stores directly in lds and we skip upcast
-    self.assertEqual(stores[0].src[1].dtype, dtypes.float)
-    #assert stores[0].src[-1].op is not Ops.VECTORIZE
-
-    # the global store doesn't change
-    assert stores[1].src[1].dtype == dtypes.float
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

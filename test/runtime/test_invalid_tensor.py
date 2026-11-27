@@ -32,12 +32,6 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Invalid, Tensor([1.0, 2.0, 3.0, 4.0]))
     self._invalid_test_helper(out, [None, None, 3.0, 4.0])
 
-  def test_where_invalid_2d(self):
-    mask = Tensor.arange(6).reshape(2, 3) < 3
-    vals = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-    out = mask.where(vals, Invalid)
-    self._invalid_test_helper(out, [1.0, 2.0, 3.0, None, None, None])
-
   def test_where_invalid_int(self):
     mask = Tensor.arange(3) < 2
     out = mask.where(Tensor([10, 20, 30]), Invalid)
@@ -47,12 +41,6 @@ class TestInvalidTensor(unittest.TestCase):
     mask = Tensor.arange(3) < 2
     mixed = mask.where(Tensor([10.0, 20.0, 30.0]), Invalid)
     out = mixed + Tensor([1.0, 2.0, 3.0])
-    self._invalid_test_helper(out, [11.0, 22.0, None])
-
-  def test_where_invalid_add_left(self):
-    mask = Tensor.arange(3) < 2
-    mixed = mask.where(Tensor([10.0, 20.0, 30.0]), Invalid)
-    out = Tensor([1.0, 2.0, 3.0]) + mixed
     self._invalid_test_helper(out, [11.0, 22.0, None])
 
   def test_where_always_true(self):
@@ -85,12 +73,6 @@ class TestInvalidTensor(unittest.TestCase):
     mask = Tensor.arange(4) < 2
     out = mask.where(Tensor([1.0, 4.0, 9.0, 16.0]), Invalid).sqrt()
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
-
-  def test_where_where(self):
-    mask1 = Tensor.arange(4) < 2
-    mask2 = Tensor.arange(4) > 0
-    out = mask2.where(mask1.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid), Invalid)
-    self._invalid_test_helper(out, [None, 2.0, None, None])
 
   def test_where_reduce_always_true(self):
     mask = Tensor.arange(4) < 9

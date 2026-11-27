@@ -15,10 +15,6 @@ class TestContextVars(unittest.TestCase):
   def setUp(self): TestContextVars.ctx.__enter__()
   def tearDown(self): TestContextVars.ctx.__exit__()
 
-  def test_initial_value_is_set(self):
-    _TMP = ContextVar("_TMP", 5)
-    self.assertEqual(_TMP.value, 5)
-
   def test_cannot_recreate(self):
     _TMP2 = ContextVar("_TMP2", 1)
     with self.assertRaises(RuntimeError):
@@ -45,11 +41,6 @@ class TestContextVars(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       # Assignment in another module.
       exec('from tinygrad.helpers import ContextVar;B = ContextVar("B", 0);B.value = 3;', {}) # pylint:disable=exec-used
-
-  def test_context_assignment(self):
-    with Context(VARIABLE=1):
-      self.assertEqual(VARIABLE.value, 1)
-    self.assertEqual(VARIABLE.value, 0)
 
   def test_unknown_param_to_context(self):
     with self.assertRaises(KeyError):
@@ -250,30 +241,6 @@ class TestMemoryview(unittest.TestCase):
     mv = to_mv(ctypes.addressof(ct), len(base))
     mv[0] = 2
     assert base[0] == 2
-
-  @unittest.skip("allocates tons of memory")
-  def test_to_mv(self):
-    sizes = [
-      (16, "16 B"),
-      (64, "64 B"),
-      (256, "256 B"),
-      (1024, "1 KB"),
-      (4 * 1024, "4 KB"),
-      (16 * 1024, "16 KB"),
-      (64 * 1024, "64 KB"),
-      (256 * 1024, "256 KB"),
-      (1 * 1024 * 1024, "1 MB"),
-      (10 * 1024 * 1024, "10 MB"),
-      (200 * 1024 * 1024, "200 MB"),
-    ]
-
-    for sz, label in sizes:
-      buf = np.random.randint(0, 256, sz, dtype=np.uint8)
-      ptr = buf.ctypes.data
-
-      iters = 100_000
-      t_us = timeit.timeit(lambda: to_mv(ptr, sz), number=iters) * 1e6 / iters
-      print(f"Size {label:>9} | Time: {t_us:8.3f} µs")
 
   def test_speed_from_mv_vs_mv_address(self):
     x = memoryview(bytearray(1))

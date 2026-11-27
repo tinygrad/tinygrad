@@ -142,6 +142,43 @@ class TestTensorUnique(unittest.TestCase):
     Tensor.realize(b,c)
     self.assertIs(b.uop.buffer, c.uop.buffer)
 
+class TestRandomness(unittest.TestCase):
+  def test_rand_like_zero_shape(self):
+    empty = Tensor.empty(0, 20)
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+  def test_rand_like_dtype(self):
+    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.rand_like(empty, dtype=dtypes.float16)
+    assert rand.shape == empty.shape
+    assert rand.dtype == dtypes.float16
+    assert rand.device == empty.device
+
+  def test_randn_like_dtype(self):
+    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
+    rand = Tensor.randn_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.randn_like(empty, dtype=dtypes.float16)
+    assert rand.shape == empty.shape
+    assert rand.dtype == dtypes.float16
+    assert rand.device == empty.device
+
+  def test_randn_device(self):
+    self.assertEqual(Tensor.randn(3,3,device="NULL").device, "NULL")
+
 class TestRand(unittest.TestCase):
   def test_rand_large_tensor(self):
     # large tensor rand (num > uint32.max) should not crash in frontend
@@ -238,23 +275,6 @@ class TestTinygrad(unittest.TestCase):
     b = Tensor.zeros_like(a, dtype=dtypes.int8)
     assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
-
-  def test_ones_like_has_same_dtype_and_shape(self):
-    for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
-      a = Tensor([1, 2, 3], dtype=datatype)
-      b = Tensor.ones_like(a)
-      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
-      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
-
-    a = Tensor([1, 2, 3])
-    b = Tensor.ones_like(a, dtype=dtypes.int8)
-    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
-
-  def test_rand_like_device(self):
-    a = Tensor.ones(3, 3, device="NULL")
-    b = Tensor.rand_like(a)
-    self.assertEqual(b.device, a.device)
 
   def test_ndim(self):
     assert Tensor(1).ndim == 0

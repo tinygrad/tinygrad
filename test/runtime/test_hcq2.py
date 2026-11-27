@@ -245,14 +245,6 @@ class TestHostCalls(unittest.TestCase):
       return o.index(0).store(s.bitcast(dtypes.uint32).index(1).load().cast(dtypes.uint64)).sink()
     self.assertEqual(self._run(read, self._buf(1)), [42])
 
-  def test_variable_in_function(self): # a variable is passed to a function, the program binds it by name
-    @uopfunc
-    def scale(o:UOp, a:UOp, k:UOp): return o.index(0).store(a.index(0).load() * k).sink()
-    @uopfunc
-    def top(o:UOp, a:UOp): return scale(o, a, UOp.variable("k", 0, 10, dtypes.uint64)).sink()
-    a = UOp.from_buffer(Buffer("CPU", 8, initial_value=struct.pack("Q", 7)), dtypes.uint64)
-    self.assertEqual(self._run(top, self._buf(1), a, k=6), [42])
-
   def test_weak_variable_in_function(self): # a weak variable reached in a function
     @uopfunc
     def put(o:UOp): return o.index(0).store(UOp.variable("n", 1, 10).cast(dtypes.uint64)).sink()

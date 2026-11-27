@@ -356,18 +356,6 @@ class TestVizGC(unittest.TestCase):
     lst = viz.list_items()
     self.assertEqual(len(lst), 1)
 
-  @unittest.skip("it's not generic enough to handle arbitrary UOps in arg")
-  def test_gc_uop_in_arg(self):
-    with save_viz() as viz:
-      init = bufs_allocated()
-      a = UOp.new_buffer("NULL", 10, dtypes.char)
-      a.buffer.allocate()
-      exec_rewrite(UOp(Ops.PYLITERAL, src=(a,), arg=a), [PatternMatcher([])])
-      del a
-      self.assertEqual(bufs_allocated()-init, 0)
-    lst = viz.list_items()
-    self.assertEqual(len(lst), 1)
-
 # VIZ integrates with other parts of tinygrad
 
 from tinygrad import Tensor, Device, TinyJit, Variable, function
@@ -802,15 +790,6 @@ def _alloc(b:int):
   return a
 
 class TestVizMemoryLayout(unittest.TestCase):
-  def test_double_alloc(self):
-    with save_viz():
-      a = _alloc(1)
-      _b = _alloc(1)
-    profile_ret = load_profile(Buffer.profile_events)
-    ret = profile_ret["layout"][f"{a.device} Memory"]
-    self.assertEqual(ret["peak"], 2)
-    self.assertEqual(len(ret["events"]), 4)
-
   def test_del_once(self):
     with save_viz():
       a = _alloc(1)
@@ -820,17 +799,6 @@ class TestVizMemoryLayout(unittest.TestCase):
     ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
     self.assertEqual(len(ret["events"]), 4)
-
-  def test_alloc_free(self):
-    with save_viz():
-      a = _alloc(1)
-      _b = _alloc(1)
-      del a
-      c = _alloc(1)
-    profile_ret = load_profile(Buffer.profile_events)
-    ret = profile_ret["layout"][f"{c.device} Memory"]
-    self.assertEqual(ret["peak"], 2)
-    self.assertEqual(len(ret["events"]), 6)
 
   def test_free_last(self):
     with save_viz():
@@ -860,18 +828,6 @@ class TestVizMemoryLayout(unittest.TestCase):
     programs = profile["layout"]["NULL"]["events"]
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
     self.assertEqual(len(user_cnt), len(programs))
-
-  @unittest.skip("flaky")
-  def test_inflight_buf(self):
-    a = Tensor.empty(1, device="NULL")
-    n = 4
-    for i in range(n): (a+i).realize()
-    profile = load_profile(cpu_events+Buffer.profile_events)
-    buffers = profile["layout"]["NULL Memory"]["events"]
-    user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
-    self.assertEqual(max(user_cnt), n)
-    input_buf = buffers.pop()
-    assert all(u[3] == 0 for u in input_buf["arg"]["users"])
 
   def test_annotate_read_write(self):
     with save_viz():

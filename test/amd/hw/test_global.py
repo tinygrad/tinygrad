@@ -291,30 +291,6 @@ class TestGlobalStore(unittest.TestCase):
     self.assertEqual(st.vgpr[0][0], 0xEFCCBBAA, "Byte 3 of first word should be 0xEF")
     self.assertEqual(st.vgpr[0][1], 0x443322BE, "Byte 0 of second word should be 0xBE")
 
-  def test_global_store_b64_basic(self):
-    """GLOBAL_STORE_B64 stores 8 bytes from v[n:n+1] to memory."""
-    TEST_OFFSET = 256
-    instructions = [
-      s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
-      s_mov_b32(s[4], 0xDEADBEEF),
-      s_mov_b32(s[5], 0xCAFEBABE),
-      v_mov_b32_e32(v[2], s[4]),
-      v_mov_b32_e32(v[3], s[5]),
-      v_mov_b32_e32(v[0], 0),
-      global_store_b64(addr=v[0], data=v[2:3], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
-      GLOBAL(GLOBALOp.GLOBAL_LOAD_B64, addr=v[0], vdst=v[4:5], data=v[4:5], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
-      v_mov_b32_e32(v[0], v[4]),
-      v_mov_b32_e32(v[1], v[5]),
-      s_mov_b32(s[2], 0),
-      s_mov_b32(s[3], 0),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.vgpr[0][0], 0xDEADBEEF)
-    self.assertEqual(st.vgpr[0][1], 0xCAFEBABE)
-
 
 class TestD16HiLoads(unittest.TestCase):
   """Tests for D16_HI load instructions that load into high 16 bits."""

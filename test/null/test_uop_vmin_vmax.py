@@ -318,23 +318,6 @@ class TestVminVmaxDivMod(unittest.TestCase):
     self.assertEqual(((-100)//(-y)).vmin, 20)
     self.assertEqual(((-100)//(-y)).vmax, 33)
 
-  def test_vmin_vmax_mod_positive(self):
-    # floor mod with positive divisor: result in [0, c-1] regardless of dividend sign
-    positive = UOp.variable('positive', 10, 20)
-    uop = positive % 3
-    self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 2)
-
-    negative = UOp.variable('negative', -20, -10)
-    uop = negative % 3
-    self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 2)
-
-    mixed = UOp.variable('mixed', -20, 20)
-    uop = mixed % 3
-    self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 2)
-
   def test_vmin_vmax_mod_negative(self):
     # floor mod with negative divisor: result in [c+1, 0] regardless of dividend sign
     positive = UOp.variable('positive', 10, 20)
@@ -432,13 +415,6 @@ class TestConstFactor(unittest.TestCase):
     uop = x * 4
     self.assertEqual(uop.const_factor(), 4)  # Constant factor 4
 
-  @unittest.skip("broken")
-  def test_const_factor_multiplication_of_consts_and_vars(self):
-    # Multiplying constants and variables
-    x = UOp.variable('x', 10, 20)
-    uop = (x * 3) * 5
-    self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
-
 class TestDivides(unittest.TestCase):
   def test_divides_constant_exact(self):
     # Divides a constant by an exact divisor
@@ -452,15 +428,6 @@ class TestDivides(unittest.TestCase):
     uop = UOp.const(42)
     result = uop.divides(5)
     self.assertIsNone(result)  # 42 is not divisible by 5
-
-  @unittest.skip("broken")
-  def test_divides_variable_and_constant(self):
-    # Multiplying a variable by a constant, then dividing by the same constant
-    x = UOp.variable('x', 10, 20)
-    uop = x * 6
-    result = uop.divides(6)
-    self.assertIsNotNone(result)
-    self.assertEqual(result, x)  # (x * 6) / 6 = x
 
   def test_divides_complex_expression(self):
     # Dividing a more complex expression

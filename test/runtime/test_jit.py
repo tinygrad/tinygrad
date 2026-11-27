@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from test.helpers import assert_jit_cache_len, needs_devices
 from tinygrad import Tensor, TinyJit, Device, dtypes, Context, UOp
-from tinygrad.helpers import DEV, GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.engine.jit import JitError
 from tinygrad.renderer.x86 import X86Renderer
 
@@ -345,34 +345,6 @@ class TestJit(unittest.TestCase):
       jit_step(conv, x, y)
       np.testing.assert_allclose(conv.weight.grad.numpy(), ref, atol=1e-4, rtol=1e-5)
 
-@unittest.skip("Pending multioutput implementation #3607")
-class TestMultioutputJit(unittest.TestCase):
-  def _test(self, f):
-    for _ in range(5):
-      a, b = Tensor.randn(10, 10), Tensor.randn(10, 10)
-      out0, out1, out2 = f(a, b)
-      np.testing.assert_allclose(out0.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(out1.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(out2.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
-
-  def test_jit_multioutput_realize(self):
-    @TinyJit
-    def fxn(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()
-    self._test(fxn)
-    assert_jit_cache_len(fxn, 3)
-
-  def test_jit_multioutput_norealize(self):
-    @TinyJit
-    def fxn(a, b): return a+b, a-b, a*b
-    self._test(fxn)
-    assert_jit_cache_len(fxn, 1)
-
-  def test_jit_multioutput_mix(self):
-    @TinyJit
-    def fxn(a, b): return a+b, a-b, (a*b).realize()
-    self._test(fxn)
-    assert_jit_cache_len(fxn, 2)
-
 class TestCopyInsideJit(unittest.TestCase):
   def test_copy_inside_jit(self):
     @TinyJit
@@ -538,22 +510,6 @@ class TestJitGraphSplit(unittest.TestCase):
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
     self.expect(f, inp, inp_cpu)
 
-  def test_jit_cpu_several(self):
-    if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
-
-    @TinyJit
-    def f(inp, inp_cpu):
-      op0 = self.compute(Device.DEFAULT, inp)
-      op1 = self.compute(Device.DEFAULT, op0)
-      op2 = self.compute("CPU", inp_cpu)
-      op3 = self.compute("CPU", op2)
-      op4 = self.compute(Device.DEFAULT, op1)
-      return op3, op4
-
-    inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
-    inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
-    self.expect(f, inp, inp_cpu)
-
   @needs_devices(2)
   def test_jit_multidev(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -590,22 +546,6 @@ class TestJitGraphSplit(unittest.TestCase):
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
     self.expect(f, inp, inp_d1)
 
-  @unittest.skip("this fails if you don't have SDMA or are using AMD_DISABLE_SDMA=1")
-  @unittest.skipIf(DEV.interface.startswith("MOCK"), "MockGPU does not support parallel copies")
-  def test_jit_multidev_copy(self):
-    if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
-
-    @TinyJit
-    def f(inp):
-      op0 = self.compute(Device.DEFAULT, inp)
-      op1 = self.compute(Device.DEFAULT, op0)
-      op2 = self.copy(Device.DEFAULT, "CPU", op1)
-      op3 = self.compute("CPU", op2)
-      return op3
-
-    inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
-    self.expect(f, inp)
-
 class TestJitInsideJit(unittest.TestCase):
   def test_jit_jit_error(self):
     @TinyJit
@@ -633,6 +573,47 @@ class TestJitRandom(unittest.TestCase):
         for _ in range(5): tst[r].append(f().tolist())
     for i, (t0, t1) in enumerate(zip(tst[0], tst[1])):
       self.assertListEqual(t0, t1, msg=f"mismatch at list {i}")
+
+# The JIT functions as a "capturing" JIT.
+# Whatever kernels ran in the JIT the second run through the function will be the kernels that will run from then on.
+# Explicit inputs to the function are updated in the JIT graph to the new inputs.
+
+# JITs have four tensor types
+#  1. Tensors that are explicit in the input, aka what's passed in. TODO: support lists/dicts/classes, anything get_state works on
+#  2. Tensors that are explicit in the output, aka what's returned. TODO: same as above
+#  3. Tensors that are implicit in the input as a closure.
+#  4. Tensors that are implicit in the output because they were assigned to and realized.
+
+# explicit inputs and outputs are realized on their way in and out of the JIT
+# there's a whole bunch of edge cases and weirdness here that needs to be tested and clarified.
+
+class TestJitCases(unittest.TestCase):
+  def test_explicit(self):
+    # this function has an explicit input and an explicit output
+    @TinyJit
+    def f(x:Tensor):
+      ret:Tensor = x*2
+      return ret
+
+    for i in range(5):
+      out = f(Tensor([i]))
+      self.assertEqual(out.item(), i*2)
+
+  def test_implicit_io(self):
+    # x is the implicit input (like a weight)
+    # out is the implicit output (it's assigned to)
+    x = Tensor([0])
+    out = Tensor([0])
+
+    # this function has an implicit input and an implicit output
+    @TinyJit
+    def f():
+      out.assign(x*2).realize() # NOTE: this must be realized here
+
+    for i in range(5):
+      x.assign(Tensor([i])).realize()
+      f()
+      self.assertEqual(out.item(), i*2)
 
 if __name__ == '__main__':
   unittest.main()

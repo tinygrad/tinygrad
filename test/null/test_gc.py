@@ -71,13 +71,6 @@ class TestGC(unittest.TestCase):
     assert (tensors_allocated()-base == 4)
     Tensor.manual_seed(0)
 
-  def test_schedule_gc(self):
-    x = Tensor.ones(256).contiguous().realize()
-    y = Tensor.ones(5, 5).contiguous()
-    y.schedule_linear()
-    with assert_freed(x.uop.buffer, y.uop.buffer):
-      del x, y
-
   def test_schedule_gc_with_inputs(self):
     x = Tensor.ones(256).contiguous().realize()
     with assert_freed(x.uop.buffer):

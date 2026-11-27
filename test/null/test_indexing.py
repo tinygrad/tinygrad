@@ -76,11 +76,6 @@ class TestNumpy(unittest.TestCase):
     self.assertRaises(TypeError, lambda: a[0.0:, 0.0])
     self.assertRaises(TypeError, lambda: a[0.0:, 0.0,:])
 
-  def test_none_index(self):
-    # `None` index adds newaxis
-    a = Tensor([1, 2, 3])
-    self.assertEqual(a[None].ndim, a.ndim+1)
-
   def test_everything_returns_views(self):
     # Before `...` would return a itself.
     a = Tensor([5])

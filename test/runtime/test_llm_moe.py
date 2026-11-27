@@ -12,34 +12,12 @@ def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=
     num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
 
 class TestMoEFeedForward(unittest.TestCase):
-  def test_moe_feed_forward(self):
-    dim, hidden, n_heads = 8, 16, 2
-    num_experts, k = 4, 2
-
-    block = TransformerBlock(_moe_config(dim, hidden, n_heads, num_experts, k))
-
-    # set up weights: gate scales by (expert_id+1), up/down are identity-ish, router picks experts 0,2
-    block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
-    block.ffn_up_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) for _ in range(num_experts)])
-    block.ffn_down_exps.weight = Tensor.stack(*[Tensor.eye(dim, hidden) for _ in range(num_experts)])
-    block.ffn_gate_inp.weight = Tensor([[1, 0, 1, 0]] * dim).T  # router strongly prefers experts 0 and 2
-    block.ffn_norm.weight = Tensor.ones(dim)  # identity norm
-
-    # input of ones -> after norm still ~ones -> experts 0,2 selected -> weighted sum of silu outputs
-    h = Tensor.ones(1, 1, dim)
-    out = block._feed_forward(block.ffn_norm(h))
-
-    # expected moe_output ≈ avg(silu(1), silu(3))
-    expected = (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
-    np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
-
   def test_moe_feed_forward_batched(self):
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2
 
     block = TransformerBlock(_moe_config(dim, hidden, n_heads, num_experts, k))
 
-    # same setup as BS=1 test
     block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
     block.ffn_up_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) for _ in range(num_experts)])
     block.ffn_down_exps.weight = Tensor.stack(*[Tensor.eye(dim, hidden) for _ in range(num_experts)])

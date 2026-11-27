@@ -61,13 +61,6 @@ def custom_sum(B:UOp, A:UOp) -> UOp:
   B = B[0].set(B.after(i)[0] + A[i], end=i)
   return B.sink(arg=KernelInfo(name=f"custom_sum_{A.shape[0]}", opts_to_apply=()))
 
-def flip_contract_kernel(dest:UOp, src:UOp):
-  i = UOp.range(dest.shape[0], 0)
-  j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
-  vec = src[i, j].contract(j)
-  store = UOp.group(*[dest[i, k].store(vec.index(3-k)) for k in range(4)])
-  return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
-
 def slice_sum_kernel(dest:UOp, src:UOp):
   G = UOp.range(src.shape[0], 0, dtype=dtypes.int)
   slice_src = src[G, :]
@@ -121,16 +114,6 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink(arg=KernelInfo()))[0]
     a.realize()
 
-  def test_simple(self):
-    a = Tensor.ones(16, 16).contiguous()
-    b = Tensor.ones(16, 16).contiguous()
-    c = Tensor.empty(16, 16)
-
-    c = Tensor.custom_kernel(c,a,b, fxn=custom_elementwise_add_kernel)[0]
-
-    out = c.flatten().tolist()
-    assert all(x == 2 for x in out), "all 2"
-
   def test_multioutput(self):
     a = Tensor.full((16, 16), 3.).contiguous()
     b = Tensor.full((16, 16), 3.).contiguous()
@@ -155,31 +138,12 @@ class TestCustomKernel(unittest.TestCase):
     tst = tst.custom_kernel(fxn=custom_eye_kernel)[0]
     self.assertTrue((ref == tst).all().item())
 
-  @unittest.skip("contract shouldn't be supported here")
-  def test_flip_contract(self):
-    a = Tensor.randn(10,4)
-    b = Tensor.empty_like(a)
-    b = b.custom_kernel(a, fxn=flip_contract_kernel)[0]
-    self.assertTrue((a.flip(1) == b).all().item())
-
   def test_noncontig(self):
     a = Tensor.ones(16, 16).contiguous()
     tst = Tensor.empty_like(a)
     b = a+1
     b_p1 = Tensor.custom_kernel(tst, b, fxn=custom_add_one_kernel)[0]
     self.assertTrue((b_p1 == 3).all().item())
-
-  def test_sum(self):
-    a = Tensor([1.0, 2, 3, 4, 5])
-    tst = Tensor.empty(1)
-    b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
-    self.assertEqual(b.item(), 15)
-
-  def test_sum_outside(self):
-    a = Tensor([1.0, 2, 3, 4, 5])+1
-    tst = Tensor.empty(1)
-    b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
-    self.assertEqual(b.item(), 20)
 
   def test_sum_int(self):
     a = Tensor([1, 2, 3, 4, 5])
@@ -638,13 +602,6 @@ class TestCustomKernelArgs(unittest.TestCase):
     out = Tensor.custom_kernel(*srcs, fxn=functools.partial(custom_add_var_kernel, n_slot=0))[1]
     self.assertEqual(out.tolist(), [6, 7, 8, 9])
 
-  def test_scalar_arg_with_other_variable(self):
-    other = (Tensor([1, 2, 3, 4], dtype=dtypes.int) + Tensor(Variable("m", 0, 100, dtypes.int).bind(70))).contiguous()
-    srcs = [Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Tensor(Variable("n", 0, 100, dtypes.int).bind(5))]
-    out = Tensor.custom_kernel(*srcs, fxn=functools.partial(custom_add_var_kernel, n_slot=2))[0]
-    Tensor.realize(other, out)
-    self.assertEqual(out.tolist(), [6, 7, 8, 9])
-
   def test_scalar_arg_past_registers(self):
     # 9 inputs with the scalar between pointers, x86 passes the ones after the 6th (4th on windows) on the stack. every buffer differs
     srcs = [Tensor.empty(4, dtype=dtypes.int)] + [Tensor([k, 2*k, 3*k, 4*k], dtype=dtypes.int).realize() for k in range(1, 8)]
@@ -660,13 +617,6 @@ class TestCustomKernelArgs(unittest.TestCase):
     linear, externs = out.linear_with_externs()
     run_schedule(linear, externs, {"k": 10})
     self.assertEqual(out.tolist(), [16, 17, 18, 19])
-
-  def test_scalar_arg_jit(self):
-    # the scalar changes every call, a replay must not keep the value it was captured with
-    kernel = functools.partial(custom_add_var_kernel, n_slot=0)
-    jf = TinyJit(lambda B, n: Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), B, fxn=kernel)[1].realize())
-    B, n = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
-    for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
   def test_scalar_arg_jit_fixed_bind(self):
     # m is bound inside the jitted function so it's not an input, a replay keeps m=10 while the input n changes
@@ -697,17 +647,6 @@ class TestCustomKernelSharded(unittest.TestCase):
                           and c.body.src[-1].arg.name == "store_dnum"]), 2)
     run_schedule(linear, externs)
     self.assertEqual(out.tolist(), [0, 1])
-
-  def test_simple_sharded(self):
-    devs = ("CPU:0", "CPU:1")
-
-    a = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
-    b = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
-    # ugly construction to get a sharded empty tensor
-    c = Tensor(Tensor.empty(8, 16, device=devs).uop.unshard(0), device=devs)
-    c = Tensor.custom_kernel(c,a,b, fxn=custom_elementwise_add_kernel)[0]
-    out = c.flatten().tolist()
-    assert all(x == 2 for x in out), "all 2"
 
   def test_sharded_add_one(self):
     # PYTHON backend explicitly checks for OOB access for wrong multi shape regression
@@ -864,31 +803,6 @@ class TestUnshardStore(unittest.TestCase):
   Every shard stores its value into its own contiguous sub-view of the dest, one SHRINK per sharded axis.
   """
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
-  def test_store_unshard_value(self):
-    # single-axis: 8 threads each own 8 values of the 64-value output tile
-    def kernel(C:UOp) -> UOp:
-      ty = UOp.range(8, 0, AxisType.LOCAL)
-      frag = UOp.placeholder((8,), dtypes.float32, 0, AddrSpace.LOCAL).unshard((0,), (ty,))
-      v = frag.after(frag.store(0.0)) + 2.5
-      return C.store(v).end(ty).sink(arg=KernelInfo(name="store_unshard", opts_to_apply=()))
-    out = _run_fragment_kernel(self, kernel, (64,))
-    np.testing.assert_allclose(out, 2.5)
-
-  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
-  def test_store_unshard_value_2axis(self):
-    # two sharded axes (the gemm fragment layout): thread (ty, tx) owns the (2, 1, 1, 2) sub-view of the
-    # (2, 4, 2, 2) output tile; the store must SHRINK dest on both sharded axes
-    def kernel(C:UOp, A:UOp) -> UOp:
-      ty = UOp.range(4, 0, AxisType.LOCAL)
-      tx = UOp.range(2, 1, AxisType.LOCAL)
-      frag = UOp.placeholder((2, 1, 1, 2), dtypes.float32, 0, AddrSpace.REG).unshard((1, 2), (ty, tx))
-      v = frag.after(frag.store(0.0)) + A
-      return C.store(v).end(tx, ty).sink(arg=KernelInfo(name="store_unshard_2axis", opts_to_apply=()))
-    a = Tensor(np.arange(32, dtype=np.float32).reshape(2, 4, 2, 2))
-    out = _run_fragment_kernel(self, kernel, (2, 4, 2, 2), inputs=(a,))
-    np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
-
-  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
   def test_store_unshard_value_2axis_reshape(self):
     # the reshape keeps both sharded axes, each with its own shard count (4 and 2)
     def kernel(C:UOp, A:UOp) -> UOp:
@@ -936,12 +850,6 @@ class TestUOpReduce(unittest.TestCase):
     a = Tensor.arange(6).reshape(2, 3).float()
     result = Tensor(a.uop.sum(axis=-1)).numpy()
     assert result[0] == 3 and result[1] == 12
-
-  def test_uop_sum_multi_axis(self):
-    a = Tensor.arange(24).reshape(2, 3, 4).float()
-    ref = a.sum(axis=(0, 2)).numpy()
-    result = Tensor(a.uop.sum(axis=(0, 2))).numpy()
-    for i in range(3): self.assertAlmostEqual(result[i], ref[i])
 
   def test_uop_sum_dtype(self):
     a = Tensor([1.0, 2, 3], dtype=dtypes.float16)

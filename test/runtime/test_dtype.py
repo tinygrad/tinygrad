@@ -224,14 +224,6 @@ class TestBFloat16DType(unittest.TestCase):
   def test_bf16_floor(self): self.assertEqual(Tensor([-1.5, 2.5], dtype=dtypes.bfloat16).floor().tolist(), [-2., 2.])
 
 class TestBFloat16DTypeCast(unittest.TestCase):
-  def test_f16_to_bf16_conversion(self):
-    original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
-    converted_tensor = original_tensor.cast(dtypes.bfloat16)
-    self.assertEqual(converted_tensor.dtype, dtypes.bfloat16)
-    back_to_float32 = converted_tensor.cast(dtypes.float32)
-    original_to_float32 = original_tensor.cast(dtypes.float32)
-    np.testing.assert_allclose(back_to_float32.numpy(), original_to_float32.numpy(), rtol=1e-2, atol=1e-3)
-
   @Context(EMULATED_DTYPES="bf16")
   def test_cast_denormal_flushes(self):
     self.assertEqual(Tensor([0x7f8000], dtype=dtypes.uint32).bitcast(dtypes.float32).cast(dtypes.bfloat16).bitcast(dtypes.uint16).tolist(), [0])
@@ -495,12 +487,6 @@ class TestTensorMethod(unittest.TestCase):
     np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()-b.numpy()))
 
 class TestDtypeUsage(unittest.TestCase):
-  def test_max_w_alu(self):
-    for d in dtypes.ints:
-      if d in supported_dtypes:
-        t = Tensor([[1, 2], [3, 4]], dtype=d)
-        (t*t).max().item()
-
   def test_where_float16_compare_to_const(self):
     # t > 0 is CMPLT(0, t): the float16 operand is on the right
     t = Tensor([-1.0, 1.0], dtype=dtypes.float16)

@@ -34,9 +34,5 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
-  def test_bert(self):
-    # TODO: write this
-    pass
-
 if __name__ == '__main__':
   unittest.main()

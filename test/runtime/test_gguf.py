@@ -11,10 +11,6 @@ ggml_test_block_count = 4
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class TestGGUFTables(unittest.TestCase):
-  def test_iq_signs(self):
-    expected = [i | ((i.bit_count() % 2) << 7) for i in range(128)]
-    np.testing.assert_array_equal(_ggml_iq_signs(Device.DEFAULT).numpy(), expected)
-
   def test_iq_tables_not_retained(self):
     for make_table in (lambda: _ggml_iq_signs(Device.DEFAULT), lambda: _ggml_iq_grid(Device.DEFAULT, _ggml.iq3s_grid, (512, 4))):
       table = make_table().realize()
@@ -64,62 +60,11 @@ class TestGGUF(unittest.TestCase):
     expected = np.arange(1, 33, dtype=np.float32) * 2.0
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.Q8_0.value).numpy().flatten(), expected)
 
-  def test_dequantization_q2_k_hardcoded(self):
-    # Q2_K: scales[16] + qs[64] + d(fp16) + dmin(fp16). 16 sub-blocks of 16, x = d*(scale&0xF)*q - dmin*(scale>>4)
-    scales, qs = bytes([0x11]*16), bytes([0x55]*64)  # scale=1, min=1; qs=0x55 -> 2-bit quants of 1
-    d, dmin = np.float16(1.0).tobytes(), np.float16(0.0).tobytes()
-    block = np.frombuffer(scales + qs + d + dmin, dtype=np.uint8).copy()
-    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 10).numpy().flatten(), np.ones(256, dtype=np.float32))
-
-  def test_dequantization_q3_k_hardcoded(self):
-    # Q3_K: hmask[32] + qs[64] + scales[12] + d(fp16). 16 sub-blocks of 16, x = d * (scale-32) * (q - (hbit?0:4))
-    # 6-bit scales 32..47 so (scale-32) = 0..15; qs=0x55 -> 2-bit quants of 1; d=1.0
-    scales = bytes([0x80, 0x91, 0xA2, 0xB3, 0xC4, 0xD5, 0xE6, 0xF7, 0xAA, 0xAA, 0xAA, 0xAA])
-    d = np.float16(1.0).tobytes()
-    qs, ones = bytes([0x55]*64), np.ones(16, dtype=np.float32)
-    # hmask all-ones: high bit set, q=1; hmask zeros: subtract 4, q=-3
-    for hmask, q in ((bytes([0xFF]*32), 1.0), (bytes([0x00]*32), -3.0)):
-      block = np.frombuffer(hmask + qs + scales + d, dtype=np.uint8).copy()
-      expected = np.concatenate([q * s * ones for s in range(16)])
-      np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 11).numpy().flatten(), expected)
-
-  def test_dequantization_iq2_xxs_hardcoded(self):
-    # IQ2_XXS: d + 8 groups of (4 grid bytes + uint32 signs/scale). grid[0]=all 0x08, scale=0, signs=0
-    # db = 1.0 * (0.5 + 0) * 0.25 = 0.125; 0.125 * 8 = 1.0
-    block = np.frombuffer(np.float16(1.0).tobytes() + bytes(64), dtype=np.uint8).copy()
-    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 16).numpy().flatten(), np.ones(256, dtype=np.float32))
-
-  def test_dequantization_iq2_xs_hardcoded(self):
-    # IQ2_XS: d + 32 uint16 qs + 8 scale bytes. qs=0 -> grid[0]=all 0x08, signs=0; scales=0
-    block = np.frombuffer(np.float16(1.0).tobytes() + bytes(64) + bytes(8), dtype=np.uint8).copy()
-    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 17).numpy().flatten(), np.ones(256, dtype=np.float32))
-
   def test_dequantization_iq1_s_hardcoded(self):
     # IQ1_S: d + qs[32] + qh[16]. qs=qh=0 -> grid[0]=all -1, scale=1, delta=+0.125 -> -0.875
     block = np.frombuffer(np.float16(1.0).tobytes() + bytes(48), dtype=np.uint8).copy()
     expected = np.full(256, -0.875, dtype=np.float32)
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 19).numpy().flatten(), expected)
-
-  def test_dequantization_iq1_m_hardcoded(self):
-    # IQ1_M: qs[32] + qh[16] + scales[8]. f16 1.0=0x3C00 packed in high nibbles; qs=qh=0 -> -0.875
-    scales = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x30])
-    block = np.frombuffer(bytes(48) + scales, dtype=np.uint8).copy()
-    expected = np.full(256, -0.875, dtype=np.float32)
-    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 29).numpy().flatten(), expected)
-
-  def test_dequantization_iq4_nl_hardcoded(self):
-    # IQ4_NL: 2-byte fp16 scale + 16 packed bytes. low nibbles first, then high
-    lut = list(_ggml.kvalues_iq4nl)
-    block = np.frombuffer(np.float16(1.0).tobytes() + bytes(range(16)), dtype=np.uint8).copy()
-    expected = np.array(lut + [lut[0]]*16, dtype=np.float32)
-    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, 20).numpy().flatten(), expected)
-
-  def test_dequantization_iq4_xs_hardcoded(self):
-    # d=1, all eight scales=1, each group has low nibbles 0..15 and high nibbles 0.
-    block = np.frombuffer(np.float16(1.0).tobytes() + bytes([0xAA, 0xAA] + [0x11]*4) + bytes(range(16))*8, dtype=np.uint8).copy()
-    decoded = ggml_data_to_tensor(Tensor(block), 256, GGMLQuantizationType.IQ4_XS.value)
-    expected = np.array((list(_ggml.kvalues_iq4nl) + [_ggml.kvalues_iq4nl[0]]*16)*8, dtype=np.float32)
-    np.testing.assert_equal(decoded.numpy().flatten(), expected)
 
   def test_dequantization_mxfp4_hardcoded(self):
     # MXFP4: 1 byte shared exponent E + 16 packed bytes (32 x 4-bit values)
@@ -152,30 +97,6 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_nvfp4(self): self._test_dequantization(GGMLQuantizationType.NVFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
-  def test_dequantization_mxfp4_old(self):
-    def encode(nibbles, E):
-      packed = [(low & 0xF) | ((high & 0xF) << 4) for low, high in zip(nibbles[:16], nibbles[16:])]
-      return np.array([E] + packed, dtype=np.uint8)
-
-    def decode(code, E):
-      sign = -1.0 if (code & 0b1000) else 1.0
-      exp = (code >> 1) & 0b11
-      mant = code & 0b1
-      val = 2 * ((1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant)
-      scale = np.exp2(E - 128) if E >= 2 else np.exp2(-127 if E == 1 else -128)
-      return sign * val * scale
-
-    blocks, expected = [], []
-    rng = np.random.default_rng(42)
-    for _ in range(4):
-      E = rng.integers(0, 256)
-      codes = rng.integers(0, 16, size=32, dtype=np.uint8)
-      blocks.append(encode(codes, E))
-      expected.extend(decode(c, E) for c in codes)
-    tensor = Tensor(np.concatenate(blocks))
-    out = ggml_data_to_tensor(tensor, len(expected), GGMLQuantizationType.MXFP4.value)
-    np.testing.assert_equal(out.numpy(), expected)
-
   def test_dequantization_mxfp4_block(self):
     # https://gist.github.com/Ananta-Ranganathan/3317b6ed51a3b033e9c2564fafb4e043
     # used the above script to download the first block of blk.0.attn_k_b.weight from

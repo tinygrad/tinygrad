@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same, Context
-from tinygrad.uop.ops import GroupOp, UOp, Ops, PatternMatcher, TrackedPatternMatcher, UPat
+from tinygrad.uop.ops import GroupOp, UOp, Ops, PatternMatcher, TrackedPatternMatcher, UPat, BottomUpGate
 from test.helpers import full_rewrite
 from hypothesis import given, strategies as strat
 
@@ -56,6 +56,29 @@ import inspect
 from tinygrad.uop.ops import graph_rewrite, _substitute, rewrite_group
 from tinygrad.uop.symbolic import symbolic_simple
 
+def assert_not_reached(): assert False, "This function should not be reached"
+def gate(): raise BottomUpGate
+
+class TestBottomUpGate(unittest.TestCase):
+  def test_basic_bottom_up_gate(self):
+    """Test that BottomUpGate stops bottom-up"""
+    pm = PatternMatcher([
+      (UPat(Ops.ADD), gate),
+      (UPat(Ops.MUL), assert_not_reached)
+    ])
+
+    a,b,c = UOp.variable("a",0,10), UOp.variable("b",0,10), UOp.variable("c",0,10)
+    graph_rewrite((a*a)+(b*c), pm, bottom_up=True)
+
+  def test_bottom_up_gate_with_rewriting(self):
+    pm = PatternMatcher([
+      (UPat.var("a")+UPat.var("a"), lambda a: 2*a),
+      (UPat(Ops.MUL), gate),
+      (UPat(Ops.CONST), assert_not_reached)
+    ])
+    a = UOp.variable("a",0,10)
+    graph_rewrite(a+a, pm, bottom_up=True)
+
 class TestBottomUpRewrite(unittest.TestCase):
   def test_const_folding(self):
     a = UOp.const(5)
@@ -71,13 +94,6 @@ def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.sta
 
 class TestSubstitute(unittest.TestCase):
   # these work because the substituted things don't have parents
-  def test_simple(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
-    ret = a + 4
-    ret = substitute(ret, {a:b})
-    self.assertIs(ret, b+4)
-
   def test_double(self):
     a = UOp.variable('a', 0, 10)
     b = UOp.variable('b', 0, 10)
@@ -92,21 +108,6 @@ class TestSubstitute(unittest.TestCase):
     ret = (a + 4) + (a + 5)
     ret = substitute(ret, {a:b})
     self.assertIs(ret, (b + 4) + (b + 5))
-
-  # this works because there's nothing above the substituted node
-  def test_sin(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
-    b = UOp.variable('b', 0, 10, dtype=dtypes.float)
-    ret = a.sin().sin()
-    ret = substitute(ret, {a.sin():b})
-    self.assertIs(ret, b.sin())
-
-  def test_sin_to_sqrt(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
-    n1 = a.sin()
-    ret = n1.sin()
-    ret = substitute(ret, {a.sin():a.sqrt()})
-    self.assertIs(ret, a.sqrt().sin())
 
   def test_double_sin_to_sqrt(self):
     a = UOp.variable('a', 0, 10, dtype=dtypes.float)

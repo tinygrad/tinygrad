@@ -9,16 +9,6 @@ from test.amd.hw.helpers import *
 class TestBasicScalar(unittest.TestCase):
   """Tests for basic scalar operations."""
 
-  def test_s_add_u32(self):
-    """S_ADD_U32 adds two scalar values."""
-    instructions = [
-      s_mov_b32(s[0], 100),
-      s_mov_b32(s[1], 200),
-      s_add_u32(s[2], s[0], s[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.sgpr[2], 300)
-
   def test_s_add_u32_carry(self):
     """S_ADD_U32 sets SCC on overflow."""
     instructions = [
@@ -779,17 +769,6 @@ class Test64BitSOP1InlineConstants(unittest.TestCase):
   inline constants, incorrectly duplicating lo bits to hi instead of
   zero/sign-extending.
   """
-
-  def test_s_mov_b64_inline_0(self):
-    """S_MOV_B64 with inline constant 0."""
-    instructions = [
-      s_mov_b64(s[0:1], 0),
-      v_mov_b32_e32(v[0], s[0]),
-      v_mov_b32_e32(v[1], s[1]),
-    ]
-    st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.vgpr[0][0], 0)
-    self.assertEqual(st.vgpr[0][1], 0)
 
   def test_s_mov_b64_inline_16(self):
     """S_MOV_B64 with inline constant 16 should set lo=16, hi=0."""

@@ -2,13 +2,11 @@
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
+from tinygrad.helpers import Context, ceildiv, cdiv, Target
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
+from tinygrad.uop.ops import Ops, UOp, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.codegen import to_program
-from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
@@ -71,6 +69,17 @@ class TestDTypeFromUOp(unittest.TestCase):
     out = graph_rewrite(stack, pm_remove_invalid)
     self.assertEqual(out.src, (UOp.const(1, dtypes.half), UOp.const(0, dtypes.half)))
     type_verify(out.sink(), spec_program)
+
+class TestInvalidTensor(unittest.TestCase):
+  def test_uop_where_keeps_invalid_bare(self):
+    cond = UOp.const(0) < UOp.const(1)
+    idx = UOp(Ops.STACK, src=tuple(UOp.const(x) for x in range(3)))
+    out = cond.where(idx, UOp.invalid())
+    self.assertIs(cond.op, Ops.CMPLT)
+    self.assertIs(idx.op, Ops.STACK)
+    self.assertIs(out.op, Ops.WHERE)
+    self.assertIs(out.src[2].op, Ops.CONST)
+    self.assertTrue(out.src[2].is_invalid)
 
 class TestMemoryCoalescing(unittest.TestCase):
   def test_store_deps_ignore_reg_stores(self):
@@ -333,28 +342,6 @@ class TestGatedStoreRewrite(unittest.TestCase):
     self.assertIs(gated_uops[-1].op, Ops.STORE)
     self.assertEqual(len(gated_uops[-1].src), 2)
 
-  # scaled down version of TestLinearizerDumb.test_unmerged_ifs
-  @unittest.skip("we don't merge ifs anymore")
-  def test_merge_ifs_alt(self):
-    gmem0 = UOp.param(0, dtypes.float, 8)
-    gmem1 = UOp.param(1, dtypes.float, 8)
-    gidx0 = UOp.special(4, 'gidx0')
-    idx = gidx0*UOp.const(2)
-    gate = gidx0<UOp.const(1)
-    idx0 = UOp(Ops.INDEX, src=(gmem0, idx.valid(gate)))
-    idx1 = UOp(Ops.INDEX, src=(gmem1, idx.valid(gate)))
-    val = UOp.const(42.0).cast(dtypes.float)
-    stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
-    uops = to_uops_list(stores)
-    ifs = [u for u in uops if u.op is Ops.IF]
-    endifs = [u for u in uops if u.op is Ops.ENDIF]
-    self.assertEqual(len(ifs), 1)
-    self.assertEqual(len(endifs), 1)
-    gated_uops = tuple(uops[uops.index(ifs[0])+1:uops.index(endifs[0])])
-    self.assertEqual(len(gated_uops), 2)
-    for x in gated_uops: self.assertIs(x.op, Ops.STORE)
-    for x in gated_uops: self.assertEqual(len(x.src), 2)
-
 @unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
 class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
@@ -552,6 +539,45 @@ class TestUOpMethod(unittest.TestCase):
     nan2 = UOp.const(float('nan'))
     self.assertIs(nan1, nan2)
 
+class TestUOpRepr(unittest.TestCase):
+  def test_range_arg(self):
+    for axis_type in AxisType:
+      r = UOp.range(4, 2, axis_type)
+      self.assertEqual(r.arg, (axis_type, 2))
+      self.assertEqual(r.replace(arg=(axis_type, 2, 0)).arg, (axis_type, 2, 0))
+
+  def test_simple_const(self):
+    a = UOp.const(42)
+    self.assertEqual(repr(a), "UOp(Ops.CONST, arg=42, src=())")
+  def test_different_consts(self):
+    a, b = UOp.const(42), UOp.const(3)
+    expected = (
+      "UOp(Ops.ADD, arg=None, src=(\n" +
+      "  UOp(Ops.CONST, arg=42, src=()),\n" +
+      "  UOp(Ops.CONST, arg=3, src=()),))"
+    )
+    self.assertEqual(repr(a+b), expected)
+  def test_walrus_operator_indentation(self):
+    # The reference should have the same indentation as the definition
+    a = UOp.const(42)
+    expected = (
+      "UOp(Ops.ADD, arg=None, src=(\n" +
+      "  x0:=UOp(Ops.CONST, arg=42, src=()),\n" +
+      "  x0,))"
+    )
+    self.assertEqual(repr(a+a), expected)
+  def test_nested_walrus_indentation(self):
+    # Ensure indentation is consistent at multiple levels
+    b = (a:=UOp.const(1)) + a
+    expected = (
+      "UOp(Ops.MUL, arg=None, src=(\n" +
+      "  x0:=UOp(Ops.ADD, arg=None, src=(\n" +
+      "    x1:=UOp(Ops.CONST, arg=1, src=()),\n" +
+      "    x1,)),\n" +
+      "  x0,))"
+    )
+    self.assertEqual(repr(b*b), expected)
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp.const(2.0) + UOp.const(3.0)
@@ -578,10 +604,6 @@ class TestUPatHelpers(unittest.TestCase):
     self.assertNotEqual(test_upat.location[1], test_upat_named.location[1])
 
 class TestUopsObject(unittest.TestCase):
-  def test_timing(self):
-    with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]
-    assert len(ret) == 10000
-
   def test_nested(self):
     a = UOp.new_buffer(Device.DEFAULT, 1, dtypes.char)
     for _ in range(10_000): a = a+a
@@ -670,20 +692,6 @@ class TestAssembly(unittest.TestCase):
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHL, ops)
     self.assertIn(Ops.MUL, ops)
-
-  @unittest.skip("this is a questionable microoptimization i won't enforce")
-  def test_mulacc_unrolled(self):
-    # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
-    # is not        acc = acc + (a0*b0 + a1*b1 + a2*b2 + a3*b3)
-    a = Tensor.empty(1024)
-    b = Tensor.empty(1024)
-    c = (a*b).sum()
-    ast = c.schedule_linear().src[-1].src[0]
-    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
-    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-    program = to_program(ast, self.renderer)
-    uops = tuple(program.src[1].src)
-    self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):
     g1 = UOp.param(0, dtypes.int32, 2)

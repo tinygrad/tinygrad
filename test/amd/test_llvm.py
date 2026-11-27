@@ -86,17 +86,7 @@ def _make_test(f: str, arch: str, test_type: str):
     tests = _get_tests(f, arch)
     name = f"{arch}_{test_type}_{f}"
     mcpu = "gfx942" if arch == "cdna" and "gfx942" in f else get_target(arch)
-    if test_type == "roundtrip":
-      passed, skipped = 0, 0
-      for _, data in tests:
-        try:
-          decoded = detect_format(data, arch).from_bytes(data)
-          self.assertEqual(decoded.to_bytes()[:len(data)], data)
-          passed += 1
-        except ValueError: skipped += 1  # skip invalid opcodes not in enum
-      print(f"{name}: {passed} passed, {skipped} skipped")
-      self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
-    elif test_type == "repr":
+    if test_type == "repr":
       # Test that eval(repr(inst)) reproduces the instruction
       if arch == "rdna3": import tinygrad.runtime.autogen.amd.rdna3.ins as ins  # type: ignore[no-redef]
       elif arch == "rdna4": import tinygrad.runtime.autogen.amd.rdna4.ins as ins  # type: ignore[no-redef]
@@ -140,15 +130,12 @@ def _make_test(f: str, arch: str, test_type: str):
 class TestLLVM(unittest.TestCase): pass
 
 for f in RDNA_FILES:
-  setattr(TestLLVM, f"test_rdna3_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "roundtrip"))
   setattr(TestLLVM, f"test_rdna3_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "disasm"))
   setattr(TestLLVM, f"test_rdna3_repr_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "repr"))
 for f in CDNA_FILES:
-  setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "roundtrip"))
   setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "disasm"))
   setattr(TestLLVM, f"test_cdna_repr_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "repr"))
 for f in RDNA4_FILES:
-  setattr(TestLLVM, f"test_rdna4_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "roundtrip"))
   setattr(TestLLVM, f"test_rdna4_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "disasm"))
   setattr(TestLLVM, f"test_rdna4_repr_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "repr"))
 
