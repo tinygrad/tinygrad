@@ -1768,7 +1768,7 @@ def lower_body(sink:UOp) -> UOp:
   body = sink.substitute({b:UOp.param(i, b.dtype, b.shape, name=b.arg.name, addrspace=b.addrspace) for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs)
 
-instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
+instruction_cache:dict[tuple[str, type[Inst]], list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
 
 def instruction_call(inst:Inst, arch:str) -> tuple[UOp, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst)), [])
@@ -1917,7 +1917,6 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
       values.update({taken:_c(dsts[COND_TAKEN], dtypes.int), fallthrough:_c(dsts[COND_NOT_TAKEN], dtypes.int)} if len(dsts) == 2
                     else {taken:_c(next(iter(dsts.values()), -1), dtypes.int)})
       instructions.append(lower_body(route[0].store(target).sink(arg=KernelInfo("emu_branch"))))
-    if not instructions: return end
     body, bufs = instruction_block(instructions)
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
     args += [_c(block_pc, dtypes.int).after(end, *scopes)]
