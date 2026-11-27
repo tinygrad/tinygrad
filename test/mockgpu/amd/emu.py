@@ -1801,7 +1801,7 @@ def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
     seen.update(nodes)
     linear.extend(nodes)
     linear.append(call.replace(src=(call.body, *args)))
-  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
+  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block")), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 # a block has an empty body; a loop contains its header block and the rest of its iteration.
 CFGRegion = tuple[int, list["CFGRegion"]]
