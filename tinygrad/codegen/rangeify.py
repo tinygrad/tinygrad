@@ -83,7 +83,8 @@ def count_uses(tsink:UOp) -> dict[UOp, UOp]:
     # MSTACK, MSELECT, and custom kernel or program srcs are always materialized. MSTACK and MSELECT srcs drop their views.
     if x.op is Ops.MSTACK or x.op is Ops.MSELECT or x.op is Ops.CALL and (x.body.op is Ops.PROGRAM or isinstance(x.body.arg, KernelInfo)):
       for s in x.src_without_body:
-        if not call_arg(a:=s if x.op is Ops.CALL else s.base): stages[a] = a.stage(arg=StageOpts(device=a.device or tsink.device, removable=False))
+        if not (call_arg(a:=s if x.op is Ops.CALL else s.base) or a.op is Ops.CONST):
+          stages[a] = a.stage(arg=StageOpts(device=a.device or tsink.device, removable=False))
   return {k:v for k,v in stages.items() if not v.arg.removable or k.ndim > 0}
 
 pm_insert_stages = PatternMatcher([
