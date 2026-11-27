@@ -11,7 +11,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.x86 import ISARenderer
-from test.helpers import replace_opts, check_schedule, run_schedule, bound_schedule
+from test.helpers import get_uops, replace_opts, check_schedule, run_schedule, bound_schedule
 from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
@@ -65,7 +65,7 @@ class TestLinearizer(unittest.TestCase):
     ast = helper_linearizer_opt(out)
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     # slice at the last loop end
-    uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
+    uslice = [i for i,u in enumerate(uops) if u.op == Ops.BACKEDGE][-1]
     # only valid if the outermost loop ends an accumulator update, rather than an output store
     if (update:=uops[uslice].src[0]).op is Ops.STORE and update.addrspace is AddrSpace.REG:
       load_idxs = [u.src[0] for u in uops[uslice+1:] if u.op == Ops.LOAD]
@@ -126,7 +126,7 @@ class TestLinearizer(unittest.TestCase):
     opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = helper_linearizer_opt(r, [opt])
     # the uops graph is reg BUFFER -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
-    uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    uops = get_uops(replace_opts(ast, opt), Device.default.renderer)
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
     for u in uops:
@@ -167,15 +167,15 @@ class TestLinearizer(unittest.TestCase):
     linear, externs = check_schedule(a, 1)
     run_schedule(linear, externs)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    program = to_program(replace_opts(linear.src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer)
-    assert not any(u.op == Ops.WHERE for u in tuple(program.src[1].src)), "found where where where should be folded"
+    uops = get_uops(replace_opts(linear.src[-1].src[0], []), Device.default.renderer)
+    assert not any(u.op is Ops.WHERE for u in uops)
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       ast = helper_linearizer_opt(t)
-      uops = tuple(to_program(ast, renderer=Device[Device.DEFAULT].renderer).src[1].src)
+      uops = get_uops(ast, Device.default.renderer)
       # ignore kernel optimized IF statements for now
-      if if_op:=next((u for u in uops if u.op is Ops.IF), None):
+      if (if_op:=next((u for u in uops if u.op is Ops.IF), None)) is not None:
         uops = uops[:uops.index(if_op)]
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
       reg_stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace == AddrSpace.REG]

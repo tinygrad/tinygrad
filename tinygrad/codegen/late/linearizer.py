@@ -24,8 +24,8 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
-      case Ops.RANGE: priority = 5    # placing RANGE is good
-      case Ops.END | Ops.BACKEDGE: priority = -5     # placing loop exits is bad
+      case Ops.RANGE | Ops.IF: priority = 5    # placing control-flow openers late is good
+      case Ops.END | Ops.BACKEDGE | Ops.ENDIF: priority = -5     # placing control-flow exits early is good
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (len(u.ranges), priority, extra)
 

@@ -2,11 +2,11 @@ from dataclasses import replace, dataclass, field
 from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile, prod
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, cpu_profile, prod
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
 from tinygrad.helpers import strides_for_shape
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
-from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
+from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear, ParamArg
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.uir import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
@@ -266,6 +266,29 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+def remove_range(sink:UOp):
+  uops = sink.toposort()
+  acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if isinstance(u.arg, ParamArg)), default=0))
+  replacements: dict[UOp, UOp] = {}
+  for end in uops:
+    if end.op is not Ops.END: continue
+    rng = end.src[1]
+    assert rng not in replacements
+    bound, = rng.src
+    acc = UOp.placeholder((1,), rng.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
+    acc = acc.after(*end.ranges)[0].set(0)
+    entry = UOp(Ops.NOOP).after(acc, bound)
+    if bound.vmin <= 0:
+      inputs = dedup(s for x in end.src[0].toposort(lambda x: rng in x.ranges) for s in x.src_without_body if rng not in s.ranges)
+      entry = UOp(Ops.IF, src=((bound > 0).after(acc, *inputs), UOp(Ops.NOOP)))
+    loop = rng.replace(src=(entry,))
+    replacements[rng] = acc.after(loop)[0].load()
+    next_idx = replacements[rng] + 1
+    body = end.src[0]
+    edge = body.backedge(loop, next_idx.alu(Ops.CMPNE, bound.without_after).after(acc.after(body)[0].store(next_idx)))
+    replacements[end] = UOp(Ops.ENDIF, src=(entry, edge)) if entry.op is Ops.IF else edge
+  return sink.substitute(replacements, extra_pm=pm_cast_const, name="remove range")
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -394,11 +417,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
 pm_linearize_cleanups = PatternMatcher([
-  # if statements are not allowed in the graph
-  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])),
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,st))])),
 ])
 
 # requires lst be toposorted. like graph rewrite, but for lines
@@ -426,8 +447,8 @@ def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
   ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True, kernel=False)
   if ctx.renderer.inline_prefix:
     b = graph_rewrite(b, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-    b = UOp(Ops.LINEAR, src=tuple(linearize_cleanups(list(b.src[1].src) if b.op is Ops.PROGRAM \
-        else linearize(full_rewrite_to_sink(b, ctx.renderer, optimize=False)))), arg=ki.name)
+    lst = list(b.src[1].src) if b.op is Ops.PROGRAM else linearize(remove_range(full_rewrite_to_sink(b, ctx.renderer, optimize=False)))
+    b = UOp(Ops.LINEAR, src=tuple(linearize_cleanups(lst)), arg=ki.name)
   else: b = to_program(b.substitute({b.src[0]:b.src[0].replace(arg=ki)}) if b.op is Ops.PROGRAM else b.replace(arg=ki), ctx.renderer)
   return call.replace(src=(b,)+call.src[1:])
 
@@ -502,6 +523,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     if full_sink.arg.estimates is None:
       full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
+    full_sink = remove_range(full_sink)
     if renderer.packed_args and full_sink.arg.kernel: full_sink = pack_args(full_sink, prog_info.params)
     # instruction selection
     if isinstance(renderer, ISARenderer):

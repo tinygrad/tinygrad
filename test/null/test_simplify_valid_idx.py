@@ -567,8 +567,7 @@ class TestRangeShrink(unittest.TestCase):
 
   def assert_range_end(self, ranges:list[UOp], end:int):
     self.assertEqual(len(ranges), 1)
-    with Context(NOOPT=1, SPEC=0): expected = full_rewrite(UOp.const(end, dtypes.int).sink()).src[0]
-    self.assertIs(ranges[0].src[0], expected)
+    self.assertEqual(ranges[0].src[0].without_after.ssimplify(), end)
 
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3

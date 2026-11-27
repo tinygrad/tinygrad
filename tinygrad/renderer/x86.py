@@ -75,7 +75,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JGE = auto(); JMP = auto()
+  JNE = auto(); JE = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -112,10 +112,10 @@ class X86GroupOp:
               X86Ops.VCVTPS2PH, X86Ops.VPEXTRW, X86Ops.VPEXTRD}
 
   # X86Ops that read flags
-  ReadFlags = {X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JNE, X86Ops.JGE}
+  ReadFlags = {X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JNE, X86Ops.JE}
 
   # X86Ops that jump, their first src is what the LABEL they jump to marks
-  Jump = {X86Ops.JNE, X86Ops.JGE, X86Ops.JMP}
+  Jump = {X86Ops.JNE, X86Ops.JE}
 
   # X86Ops whose first src is the rm field. a TwoAddress op drops its first src post regalloc, so its Rm2nd src ends up first
   Rm1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
@@ -236,7 +236,10 @@ def mask(x:UOp) -> UOp:
   dt, v = x.src[0].dtype, UOp.cconst({Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op], dtypes.u8)
   return UOp.ins(X86Ops.VCMPSS if dt is dtypes.float32 else X86Ops.VCMPSD, x.src + (v,), dt)
 
-def test_gate(m:UOp) -> UOp: return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), UOp.cconst(0, dtypes.i32)), dtypes.void)
+def test_gate(m:UOp) -> UOp:
+  # an int CMPNE's own compare already sets the flags a NE consumer reads
+  if (g:=m.without_after).op is Ops.CMPNE and dtypes.is_int(g.src[0].dtype): return cmp(g).after(*m.src[1:]) if m.op is Ops.AFTER else cmp(g)
+  return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), UOp.cconst(0, dtypes.i32)), dtypes.void)
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
@@ -328,7 +331,11 @@ def load_const(x:UOp) -> UOp:
   return x.replace(src=(x.body,)+tuple(s if i in immediate and is_imm(s) else mov_op(s) for i,s in enumerate(x.src_without_body)))
 
 isel_matcher = PatternMatcher([
-  (UPat().backedge(UPat(), UPat.var("m", dtypes.bool), name="x"), lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
+  # **** Op -> Op ****
+  (UPat(Ops.IF, src=(UPat(GroupOp.Comparison, name="m").or_after(),), allow_any_len=True, name="x"),
+    lambda x,m: x.replace(src=(test_gate(m), *x.src[1:]))),
+  (UPat().backedge(UPat(), UPat.var("m", dtypes.bool), name="x"), lambda x,m: x.replace(src=(*x.src[:2], test_gate(m)))),
+  # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM), lambda: RDI),
   (UPat(Ops.REFPARAM, name="x"), lambda x: x.src[1]),
@@ -483,37 +490,24 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [RSP, nx]
 
-# TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
 def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 
-# a loop's LABEL follows its RANGE. a bounded RANGE's index is a register named by the RANGE, 0 before the loop, compared to the bound
-# after the LABEL and incremented before the END, the body reads it as AFTER(index, RANGE)
-def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
-  if x.dtype is dtypes.void: return x, [x, label(x)]
-  bound = x.src[0].without_after
-  idx = UOp.ins(X86Ops.MOVi, (UOp.cconst(0, x.dtype),), x.dtype, *vreg(0, x.dtype, WGPR, name=x.key.hex()))
-  cmp = UOp.ins(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, (idx, bound), dtypes.void)
-  return idx.after(x), [idx, x, start:=label(x), cmp, UOp.ins(X86Ops.JGE, (start, cmp), dtypes.void)]
-
-def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
-  inc = UOp.ins(X86Ops.ADDi, (c, UOp.cconst(1, c.dtype)), c.dtype, *regs(c.src[0]))
-  return (end:=x.replace(src=(x.src[0], c.src[1]))), [inc, end]
-
 pre_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.IF, name="x"), lambda x: (x, [x.src[0].without_after, x.ins(X86Ops.JE, (x, x.src[0].without_after), dtypes.void)])),
+  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.src[2].without_after, x])),
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
   (UPat(Ops.CALL, name="x"), lambda x: (x, []) if x.body.arg.code in {X86Ops.CMP, X86Ops.CMPi} else
    (x, [x.src[-1], x]) if x.body.arg.code in X86GroupOp.ReadFlags else None),
-  (UPat(Ops.RANGE, name="x"), lower_range),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.AFTER, name="c")), name="x"), lower_end),
+  (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: (x, [x, label(x)])),
+  (UPat(Ops.ENDIF, name="x"), lambda x: (x, [label(x.src[0])])),
 ])
 
 # ***** post register allocation *****
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [UOp.ins(X86Ops.RET, x.src, x.dtype)])),
-  # an END jumps back to its loop's LABEL and labels the loop's exit
-  (UPat(Ops.END, name="x"), lambda x: (x, [UOp.ins(X86Ops.JMP, (x.src[1],), dtypes.void), label(label(x.src[1]))])),
+  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.ins(X86Ops.JNE, (x.src[1], x.src[2].without_after), x.dtype)])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.CALL, name="x"), lambda ctx,x: (nx:=x.replace(src=(x.body,)+x.src[2:]),
    [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) is not rdef(x.src[1]) else [nx]) if x.body.arg.code in X86GroupOp.TwoAddress else None),
@@ -671,8 +665,7 @@ encodings = {
   X86Ops.VPEXTRW: lambda x: encode(x, 0x15, pp=1, sel=3), X86Ops.VPEXTRD: lambda x: encode(x, 0x16, pp=1, sel=3),
   # jumps are encoded with a placeholder which gets patched later once the real offset is known
   X86Ops.JNE: lambda x: bytes([0x0F, 0x85]) + int(0).to_bytes(4),
-  X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
-  X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
+  X86Ops.JE: lambda x: bytes([0x0F, 0x84]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
 
