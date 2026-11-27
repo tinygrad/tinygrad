@@ -2,23 +2,24 @@ import ctypes, time, os, builtins, fcntl, typing, traceback, sys
 from tinygrad.helpers import DEV, dedup, to_tuple, round_up
 from tinygrad.device import Compiled, host_of
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, NativeInfo
 from tinygrad.runtime.support.system import FileIOInterface, System
 from tinygrad.runtime.support.hcq2 import HWQueue
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 from test.mockgpu.am.amdriver import AMDriver, AMUSBDriver
+from test.mockgpu.qcom.qcomdriver import QCOMDriver
 start = time.perf_counter()
 
 drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
-                                              "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
+                                              "MOCK+NV": NVDriver, "MOCK+QCOM": QCOMDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds: dict[int, typing.Any] = {}
 
-def mock_callback(fn):
-  @ctypes.CFUNCTYPE(None, ctypes.c_uint64)
-  def callback(addr):
-    try: fn(addr)
+def mock_callback(fn, cfunctype=ctypes.CFUNCTYPE(None, ctypes.c_uint64)):
+  @cfunctype
+  def callback(*args):
+    try: return fn(*args)
     except BaseException:
       # ctypes cannot propagate exceptions to the compiled submit/wait loop. Don't leave it waiting on a failed queue.
       try:
@@ -33,12 +34,18 @@ def mockgpu_doorbell(addr:int): # compiled stores aren't tracked, so the submits
     if st <= addr < en: wcb(None, addr - st)
 setattr(libc.dll, "mockgpu_doorbell", mockgpu_doorbell)
 
+def _ioctl(fd:int, req:int, argp:int) -> int: return tracked_fds[fd].ioctl(fd, req, argp)
+# compiled submits call ioctl directly, bypassing MockFileIOInterface
+mockgpu_ioctl = mock_callback(_ioctl, ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_uint32, ctypes.c_uint64))
+setattr(libc.dll, "mockgpu_ioctl", mockgpu_ioctl)
+
 mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
 def hook_doorbells(s:UOp) -> UOp|None:
   hooks = tuple(UOp.native("mockgpu_doorbell").call(b.after(c).getaddr(host_of(d))) for c in s.toposort() if c.op is Ops.CALL
                 for b in c.src[1:] if b.op is Ops.EXTERN and "doorbell" in str(b.arg.name) and (d:=to_tuple(b.device)[0]).split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
-Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
+def hook_ioctl(f:UOp) -> UOp|None: return f.replace(arg=NativeInfo("mockgpu_ioctl")) if "QCOM" in mocked else None
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells), (UPat.native("ioctl", name="f"), hook_ioctl)])
 
 @mock_callback
 def mockgpu_progress(_:int): # compiled spin loops wait on the gpus, which run only when called

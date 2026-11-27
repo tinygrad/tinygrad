@@ -122,7 +122,9 @@ class Renderer:
   compiler: Compiler = Compiler()
 
   def __init__(self, target:Target): self.target = target
-  def __reduce__(self): return self.__class__, (self.target,)
+  def __reduce__(self):
+    from tinygrad.device import select_renderer
+    return select_renderer, (self.target,)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def asm(self, prg:UOp, lin:UOp) -> bytes: raise NotImplementedError("needs an assembler")
   def supported_dtypes(self) -> set[DType]:

@@ -392,13 +392,15 @@ class MSMIface:
     deadline = msm_drm.struct_drm_msm_timespec(*divmod(time.monotonic_ns() + tm * 1000000, 1000000000))
     with contextlib.suppress(OSError, RuntimeError): msm_drm.DRM_IOCTL_MSM_WAIT_FENCE(self.fd, fence=fence, timeout=deadline, queueid=self.ctx)
 
+class MOCKIface(KGSLIface): pass
+
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("qcom_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: QCOMComputeQueue(s).encode()),
 ])
 
 class QCOMDevice(Compiled):
   renderers = [QCOMCLRenderer, IR3Renderer]
-  ifaces = [KGSLIface, MSMIface]
+  ifaces = [KGSLIface, MSMIface, MOCKIface]
   timestamp_divider = 19.2
 
   def __init__(self, device:str=""):
