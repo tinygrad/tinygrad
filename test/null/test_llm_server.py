@@ -521,11 +521,12 @@ class TestTransformerGenerate(unittest.TestCase):
 
   def test_inkling_output(self):
     def msg(kind, body, name=''): return f'<|message_model|>{name}<|content_{kind}|>{body}<|end_message|>'
-    output = msg('thinking', 'a', 'read') + msg('text', 'b') + msg('invoke_tool_json', '{"name":"read","args":{"n":3}}', 'read') + msg('text', 'c')
+    call = msg('invoke_tool_json', '{"name":"read","args":{"n":3}}', 'read')
+    output = msg('thinking', 'a', 'read') + msg('text', 'b') + call + msg('text', 'c') + msg('xml', 'd')
     router = StreamRouter({"<|content_invoke_tool_json|>": 0})
     deltas = [d for ch in output for d in router.route(ch)] + list(router.route("", final=True))
     self.assertEqual(''.join(t for f, t in deltas if f == 'reasoning_content'), 'a')
-    self.assertEqual(''.join(t for f, t in deltas if f == 'content'), 'bc')
+    self.assertEqual(''.join(t for f, t in deltas if f == 'content'), 'bcd')
     self.assertEqual([parse_tool_call(m.group(1)) for m in re.finditer(router.call, router.calls, re.DOTALL)], [('read', {'n':3})])
 
 if __name__ == '__main__':

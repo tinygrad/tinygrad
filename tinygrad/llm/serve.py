@@ -87,7 +87,7 @@ class StreamRouter:
     self.buf += piece
     if self.mode == "undecided" and self.header:
       if not (m := re.match(self.header, self.buf)) and not final and self.end_content not in self.buf: return
-      self.mode = {"thinking":"reasoning", "text":"content"}.get(m.group(1), "tool") if m else "content"
+      self.mode = {"thinking":"reasoning", "text":"content", "invoke_tool_json":"tool"}.get(m.group(1), "content") if m else "content"
       if m and self.mode != "tool": self.buf = self.buf[m.end():]
     if self.mode == "undecided":  # decide whether the output starts with a think block
       if not final and len(self.buf) < len(self.think) and self.think.startswith(self.buf): return
