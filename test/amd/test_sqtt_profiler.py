@@ -9,7 +9,7 @@ from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
 from tinygrad.renderer.amd.sqtt import decode, print_packets, map_insts, IMMEDIATE_MASK
 from tinygrad.renderer.amd.dsl import s, v
-from tinygrad.helpers import getenv, DEV
+from tinygrad.helpers import getenv
 
 @contextlib.contextmanager
 def save_sqtt():
@@ -145,7 +145,7 @@ class TestSQTTProfiler(unittest.TestCase):
       Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, priority=0))[0].realize()
 
   def test_immediate_mask(self):
-    if not self.arch.startswith("gfx11") or DEV.interface.startswith("MOCK"): self.skipTest("needs RDNA3 hardware")
+    if not self.arch.startswith("gfx11"): self.skipTest("needs RDNA3")
     from tinygrad.runtime.autogen.amd.rdna3 import ins as isa
     # the two waves on SIMD 0 leave the barrier together and retire the s_nop in one IMMEDIATE_MASK packet
     insts = [isa.s_barrier(), isa.s_delay_alu(1), isa.s_nop(0), isa.s_endpgm()]
