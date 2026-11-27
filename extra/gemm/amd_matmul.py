@@ -5,7 +5,8 @@ from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import link_linear, run_linear
+from tinygrad.codegen.compile import compile_linear
 
 N = 4096
 run_count = 5

@@ -5,7 +5,7 @@ from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.helpers import Context, all_same, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.dtype import AddrSpace
-from tinygrad.engine.realize import compile_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
 from tinygrad.codegen import pm_copy_from_store
 from test.helpers import check_schedule, KernelCountException, jit_cache_count, measure_mem, run_schedule

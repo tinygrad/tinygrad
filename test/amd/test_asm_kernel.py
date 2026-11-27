@@ -3,7 +3,7 @@ import functools
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.engine.realize import estimate_uop, lower_and_compile
+from tinygrad.codegen.compile import estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import getenv, Context

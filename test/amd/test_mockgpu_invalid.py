@@ -8,7 +8,7 @@ class TestMockGPUInvalidInstruction(unittest.TestCase):
     test_code = '''
 import os, sys
 from tinygrad import Tensor
-from tinygrad.engine.realize import lower_and_compile
+from tinygrad.codegen.compile import lower_and_compile
 from test.helpers import run_schedule, bound_schedule
 
 linear = lower_and_compile(bound_schedule(Tensor.empty(1) + 1))

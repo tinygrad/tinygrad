@@ -11,7 +11,8 @@ from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
-from tinygrad.engine.realize import run_linear, capturing, compile_linear, link_linear
+from tinygrad.engine.realize import run_linear, capturing, link_linear
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.device import Buffer, Device, HCQ_RUNTIME_DEV, host_of
 
 # **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what it's linked to
@@ -509,9 +510,9 @@ class Tensor(Mixin):
     ```
     """
     all_uops = self.uop.toposort()
-    # backward fills .grad for every in-scope float tensor with a device
+    # backward fills .grad for every in-scope float tensor on a device that can hold it (DISK cannot)
     tensors_need_grad: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and \
-                                       t.uop in all_uops and t.is_floating_point() and t.device is not None]
+                                       t.uop in all_uops and t.is_floating_point() and t.device is not None and not t.uop.on_disk()]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"

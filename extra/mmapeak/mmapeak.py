@@ -8,7 +8,8 @@ from tinygrad.helpers import getenv, DEV
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.amd.dsl import Reg, Inst, s, v
-from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import link_linear, run_linear
+from tinygrad.codegen.compile import compile_linear
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32

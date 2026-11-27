@@ -11,7 +11,8 @@ if str(root := pathlib.Path(__file__).resolve().parent.parent) not in sys.path: 
 
 from tinygrad import Device, Tensor, UOp, dtypes
 from tinygrad.dtype import DType
-from tinygrad.engine.realize import ExecContext, compile_linear, link_linear, pm_exec
+from tinygrad.engine.realize import ExecContext, link_linear, pm_exec
+from tinygrad.codegen.compile import compile_linear
 from tinygrad.helpers import ceildiv, colored, prod, unwrap
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.uop.ops import Ops

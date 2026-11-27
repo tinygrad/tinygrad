@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Variable, dtypes, Device
 from tinygrad.helpers import Context
-from tinygrad.engine.realize import estimate_uop, compile_linear
+from tinygrad.codegen.compile import estimate_uop, compile_linear
 from tinygrad.uop.ops import sym_infer
 from tinygrad.renderer.ptx import PTXRenderer
 

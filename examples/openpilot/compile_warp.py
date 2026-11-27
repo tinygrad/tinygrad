@@ -3,7 +3,7 @@ import argparse, pickle
 from typing import NamedTuple
 import numpy as np
 from tinygrad import Tensor, Device, Context, TinyJit
-from tinygrad.engine.realize import lower_and_compile
+from tinygrad.codegen.compile import lower_and_compile
 from examples.openpilot.helpers import allocate_inputs, benchmark, make_retargetable
 
 

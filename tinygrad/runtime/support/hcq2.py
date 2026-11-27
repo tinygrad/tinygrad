@@ -10,7 +10,7 @@ from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop, pm_flatte
 from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates, TinyELF
 from tinygrad.runtime.support.c import Struct
-from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, lower_and_compile
+from tinygrad.codegen.compile import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, lower_and_compile
 
 # **** calls
 

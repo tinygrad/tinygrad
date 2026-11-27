@@ -941,10 +941,7 @@ def get_set_tensor(indexed: Tensor, indexer):
 
 @slow
 class TestAdvancedIndexing(unittest.TestCase):
-  @unittest.expectedFailure
   def test_integer_array_indexing(self):
-    # TODO: broken now, a list index into a device-less tensor stays on PYTHON and moves the tensor there.
-    # setitem with a value on the default device should work.
     # pick a random valid indexer type
     def ri(indices):
       choice = random.randint(0, 2)
