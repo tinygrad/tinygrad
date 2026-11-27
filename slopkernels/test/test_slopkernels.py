@@ -84,6 +84,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     self.assertNotIn("\x1b", sample.read_text(encoding="utf-8"))
     self.assertIsNone(slopkernels.get("nonexistent_llm_kernel"))
     # Release mode: slopkernels absent, tinygrad/llm/kernels/<name>.uir present -> loaded & executable directly from disk.
+    has_amd = _amd_target() is not None
     llm_model._load_kernel.cache_clear()
     llm_model._get_kernel.cache_clear()
     with patch.dict(sys.modules, {"slopkernels": None}):
@@ -93,7 +94,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
       self.assertIs(u_rel.op, Ops.SINK)
       self.assertTrue(any(x.is_template for x in u_rel.toposort()))
       self.assertIsNone(llm_model._load_kernel("nonexistent_llm_kernel"))
-      if _amd_target() is not None:
+      if has_amd:
         dev = Tensor.empty(1).device
         rng = np.random.default_rng(7)
         mix = Tensor(rng.normal(0, 0.2, (2, 24)).astype(np.float32)).realize()
@@ -260,7 +261,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
       w4 = ggml_data_to_tensor(Tensor(raw_tile[:4].reshape(-1), device=dev), 4 * k, qtype).reshape(4, k).numpy()
       np.testing.assert_allclose(out, w4[:, 256:384].T, rtol=8e-2, atol=1e-2)
     # 2. Unused PARAM slots (sel/grid) must not emit extra E/copy kernels or require ALLOW_DEVICE_USAGE
-    w_u8, _, w_ref = _make_q8_0(rng, 64, 256)
+    w_u8, _, _ = _make_q8_0(rng, 64, 256)
     qlin = Linear(256, 64, bias=False)
     qlin.weight = ggml_data_to_tensor(w_u8, 64 * 256, 8).reshape(64, 256)
     qx = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).realize()

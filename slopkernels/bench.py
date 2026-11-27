@@ -155,8 +155,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         return (lambda: _krun(f"{arch}_gemm_f16", (m, n), dev, w_u8, x.half().contiguous(), lut,
                               qtype=qtype, m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=k, raw_bytes=raw_bytes)), _verify
       lut, _ = _iq_lut(qtype, dev)
-      sel0 = Tensor.zeros(1, dtype=dtypes.int32, device=dev).realize()
-      return (lambda: _krun("amd_gemv_quant_f32", (m, n), dev, w_u8, x, sel0, lut, qtype=qtype,
+      return (lambda: _krun("amd_gemv_quant_f32", (m, n), dev, w_u8, x, lut.bitcast(dtypes.int32), lut, qtype=qtype,
                             tokens=m, x_rows=m, out_features=n, in_features=k, raw_bytes=raw_bytes,
                             group_rows=0, use_sel=0, x_share=1, ndev=1, arch=target[0], num_experts=0)), _verify
     kind = "gemm" if m % 16 == 0 and n % 16 == 0 else "gemv"

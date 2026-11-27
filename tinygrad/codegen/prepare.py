@@ -17,7 +17,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
       items.append(item)
       continue
     target, src = st.src
-    while src.op is Ops.AFTER or (src.op is Ops.RESHAPE and target.has_buffer_identity()): src = src.src[0]
+    while src.op is Ops.AFTER: src = src.src[0]
     base = src.storage_base
     if item is not st and base.op is not Ops.ALLOC:
       items.append(item)
@@ -26,11 +26,10 @@ def forward_call_outputs(sink:UOp) -> UOp:
     key = base if base.op is Ops.ALLOC else src
     if key not in placed and (src.op is Ops.STAGE or target.has_buffer_identity()) and \
        (tb := target.storage_base) not in st.src[1].toposort():
-      t = target if target.shape == src.shape else target.reshape(src.shape)
-      if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == tb.max_numel() and base.numel() == tb.numel():
+      if base.op is Ops.ALLOC and src.has_buffer_identity(after_ok=True) and base.max_numel() == tb.max_numel() and base.numel() == tb.numel():
         placed[key] = tb if base.shape == tb.shape else tb.reshape(base.shape)
-      elif src.op is Ops.STAGE: placed[key] = t.after(t.store(src.src[0]))
-      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[key] = t
+      elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
+      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[key] = target
       if key in placed:
         if item is not st: placed[item] = st.src[1]
         items.append(st.src[1])
@@ -107,6 +106,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # if there are few globals, make some reduces into globals by splitting into two kernels
   # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
   #   ~2**10 should be enough if GROUP is used
+  # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
   # split is moved to the end to provide maximum locality for the second phase reduce.
 
   # an axis is expanded if its range does not reach the index into the base
@@ -115,12 +115,11 @@ def split_reduceop(reduce:UOp, x:UOp):
   while u.op in GroupOp.Movement: idxs, u = apply_movement_op(u.op, u.src[0].shape, u.marg, idxs), u.src[0]
   is_expanded = [r not in UOp.sink(*idxs).ranges for r in rngs]
 
-  sm, cap = prod(reduce.shape) <= 64, 2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)
-  if not (split_candidates:=[(i,d) for a in ((16,1) if sm else (1,)) for i in range(reduce.arg[1])
-    for d in range(min(4096,x.shape[i]//8,cap) if sm else min(256,cap),8-1,-1) if d%a==0 and x.shape[i]%d==0 and not is_expanded[i]]): return None
+  if not (split_candidates:=[(i,d) for i in range(reduce.arg[1])
+                             for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
+                             if x.shape[i]%d==0 and not is_expanded[i]]): return None
   dim_to_split, divisor = split_candidates[0]
-  ax = dim_to_split + int(sm)
-  splitted = x.unflatten(dim_to_split, (-1, divisor) if sm else (divisor, -1)).permute(tuple(d for d in range(x.ndim+1) if d!=ax)+(ax,))
+  splitted = x.unflatten(dim_to_split, (divisor, -1)).permute(tuple([d for d in range(x.ndim+1) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
   return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),))

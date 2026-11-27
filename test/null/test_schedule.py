@@ -2094,28 +2094,17 @@ class TestCopyFolding(unittest.TestCase):
 
   def test_forward_call_outputs_reshaped(self):
     from tinygrad.codegen.prepare import forward_call_outputs
-    # 1. Reshaped ALLOC (CALL output) forwards target storage_base reshaped to base.shape
+    # Reshaped ALLOC (CALL output) forwards target storage_base reshaped to base.shape
     a_alloc = UOp.alloc((2, 3), dtypes.float, device="NULL")
     a_tgt = UOp.new_buffer("NULL", 6, dtypes.float).reshape((6,))
-    a_src = a_alloc.after(UOp.sink().call(a_alloc)).reshape((6,))
-    a_out = forward_call_outputs(UOp.sink(a_tgt.store(a_src)))
+    a_out = forward_call_outputs(UOp.sink(a_tgt.store(a_alloc.after(UOp.sink().call(a_alloc)).reshape((6,)))))
     self.assertEqual(a_out.src[0].shape, (6,))
     self.assertNotIn(Ops.ALLOC, [u.op for u in a_out.toposort()])
-    # 2. Reshaped STAGE forwards into contiguous target reshaped to src.shape (and preserves alias shape)
-    x = Tensor.empty(2, 3)
-    s = (x + 1).contiguous()
-    check_schedule([s.reshape(6), s], 1)
-    # 3. Reshaped BUFFER forwards into contiguous target reshaped to src.shape (preserving other uses' shape)
-    b_src = UOp.new_buffer("NULL", 6, dtypes.float)
-    b_tgt = UOp.new_buffer("NULL", 6, dtypes.float).reshape((2, 3))
-    b_out = forward_call_outputs(UOp.sink(b_tgt.store(b_src.reshape((2, 3))), b_src + 1.0))
-    self.assertEqual(b_out.src[0].shape, (2, 3))
-    self.assertEqual(b_out.src[1].shape, (6,))
-    self.assertIs(b_out.src[1].src[0].storage_base, b_tgt.storage_base)
-    # 4. Reshaped STAGE stored into a non-contiguous SHRINK target must NOT reshape target
-    cache = Tensor.empty(2, 4, 3).realize()
-    upd = cache[:, 1:2, :].assign((Tensor.empty(2, 3) + 1).contiguous().reshape(2, 1, 3))
-    check_schedule(upd, 2)
+    # Non-contiguous SHRINK of ALLOC must not forward
+    s_alloc = UOp.alloc((2, 4), dtypes.float, device="NULL")
+    s_tgt = UOp.new_buffer("NULL", 6, dtypes.float).reshape((2, 3))
+    s_out = forward_call_outputs(UOp.sink(s_tgt.store(s_alloc.after(UOp.sink().call(s_alloc)).shrink(((0, 2), (0, 3))))))
+    self.assertIn(Ops.ALLOC, [u.op for u in s_out.toposort()])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

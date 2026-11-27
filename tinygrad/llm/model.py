@@ -132,10 +132,11 @@ class Linear(nn.Linear):
 
   def _custom_dense(self, x:Tensor) -> Tensor|None:
     if self.groups != 1 or not isinstance(x.numel(), int) or self.in_features % 32 != 0: return None
-    w, xi = _unview_float(self.weight), _unview_float(x).contiguous()
+    if not (w := _unview_float(self.weight)).uop.has_buffer_identity(after_ok=True): return None
+    xi = _unview_float(x).contiguous()
     ok, tokens = (dtypes.float16, dtypes.bfloat16, dtypes.float32), int(prod(x.shape[:-1]))
-    if not w.uop.has_buffer_identity(after_ok=True) or w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok: return None
-    if xi.dtype not in ok or tokens >= 16 or (self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok)): return None
+    if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16: return None
+    if self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok): return None
     out_dt = least_upper_dtype(w.dtype, x.dtype)
     vc = 4 if self.in_features % 128 == 0 else 1
     out = _run_kernel(f"amd_gemv_{w.dtype.name}_f32", (tokens, self.out_features),
