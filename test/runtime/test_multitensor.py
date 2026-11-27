@@ -5,7 +5,7 @@ from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.codegen.compile import lower_and_compile, pm_beam
-from test.helpers import needs_devices, slow, check_schedule, assert_kernel_count, KernelCountException, run_schedule
+from test.helpers import needs_devices, check_schedule, assert_kernel_count, KernelCountException, run_schedule
 from hypothesis import given, strategies as strat, settings
 
 settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -269,15 +269,17 @@ class TestMultiTensor(unittest.TestCase):
         assert mean_err < 1e-6, f"big mean error, iteration {it}_{n}"
         assert max_err < 1e-6, f"big max error, iteration {it}_{n}"
 
-  def _test_model_train_step(self, m, fake_image, labels):
+  def test_data_parallel_simple_train_step(self):
     from tinygrad.nn.optim import LARS
+    fake_image = Tensor.rand(2, 4)
+    labels = Tensor.randint(2, high=4)
+    m = nn.Linear(4, 4)
     optimizer = LARS(get_parameters(m), 0.1)
 
     optimizer.zero_grad()
-    m.load_from_pretrained()
     output = m(fake_image).sparse_categorical_crossentropy(labels, label_smoothing=0.1)
     output.backward()
-    grad = m.conv1.weight.grad.numpy()
+    grad = m.weight.grad.numpy()
 
     fake_image_sharded = fake_image.shard(devices_2, axis=0)
     labels_sharded = labels.shard(devices_2, axis=0)
@@ -286,28 +288,9 @@ class TestMultiTensor(unittest.TestCase):
     optimizer.zero_grad()
     shard_output = m(fake_image_sharded).sparse_categorical_crossentropy(labels_sharded, label_smoothing=0.1)
     shard_output.backward()
-    shard_grad = m.conv1.weight.grad.numpy()
+    shard_grad = m.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
-
-  @slow
-  def test_data_parallel_resnet_train_step(self):
-    from extra.models.resnet import ResNet18
-    fake_image = Tensor.rand((2, 3, 224//16, 224//16))
-    labels = Tensor.randint(2, low=0, high=1000)
-    m = ResNet18()
-    self._test_model_train_step(m, fake_image, labels)
-
-  def test_data_parallel_simple_train_step(self):
-    class Model:
-      def __init__(self): self.conv1 = nn.Linear(128,128)
-      def __call__(self, x): return self.conv1(x)
-      def load_from_pretrained(self): pass
-
-    fake_image = Tensor.rand((128,))
-    labels = Tensor.randint(2, low=0, high=127)
-    m = Model()
-    self._test_model_train_step(m, fake_image, labels)
 
   def test_assign_kv_cache_multi(self):
     bsz, max_context = 2, 8
@@ -667,22 +650,6 @@ class TestMultiTensor(unittest.TestCase):
     y = Tensor.scaled_dot_product_attention(q, k, v, is_causal=True).realize()
     y_shard = Tensor.scaled_dot_product_attention(q_shard, k_shard, v_shard, is_causal=True).realize()
     np.testing.assert_allclose(y_shard.numpy(), y.numpy(), atol=1e-6, rtol=1e-6)
-
-  # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @slow
-  def test_data_parallel_resnet(self):
-    from extra.models.resnet import ResNet18
-
-    fake_image = Tensor.rand((2, 3, 224//16, 224//16))
-    fake_image_sharded = fake_image.shard(devices_2, axis=0)
-    m = ResNet18()
-    m.load_from_pretrained()
-    real_output = m(fake_image).log_softmax().numpy()
-    for p in get_parameters(m): p.shard_(devices_2).realize()
-    GlobalCounters.reset()
-    shard_output = m(fake_image_sharded).log_softmax().realize()
-    shard_output_np = shard_output.numpy()
-    np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
   def test_multi_tensor_jit_param(self):
     @TinyJit

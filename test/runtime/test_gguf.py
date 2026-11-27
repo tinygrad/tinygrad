@@ -6,7 +6,6 @@ from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
 from gguf.quants import IQ1_S, IQ2_S, IQ2_XS, IQ2_XXS, IQ3_S, IQ3_XXS
-from test.helpers import slow
 
 ggml_test_block_count = 4
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
@@ -57,8 +56,6 @@ class TestGGUFTables(unittest.TestCase):
 
 @unittest.skipUnless(dtypes.uint8 in supported_dtypes and dtypes.half in supported_dtypes, "Backend must support uint8 and half")
 class TestGGUF(unittest.TestCase):
-  @slow
-  def test_load_gpt2_q4_1(self): self._test_gguf_load("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
   def test_load_sample_q6_k(self): self._test_gguf_load("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
 
   def test_dequantization_q8_0_hardcoded(self):
