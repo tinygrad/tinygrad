@@ -222,6 +222,8 @@ class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
     "profile_ops_run_1": [1944, 4918, 1984, 2035, 2062, 1968],
     "profile_plus_run_0": [1938, 1932, 1978, 2029, 2056, 1962],
     "profile_plus_run_1": [1891, 1874, 1931, 1982, 2009, 1915],
+    "profile_call_run_0": [1089, 1178, 1080, 1113, 1135, 1121],
+    "profile_call_run_1": [1089, 1184, 1080, 1113, 1135, 1121],
   }
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
