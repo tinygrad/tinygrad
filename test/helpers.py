@@ -1,4 +1,4 @@
-import os, sys, gc, time, struct, unittest, contextlib
+import sys, gc, time, struct, unittest, contextlib
 from dataclasses import replace
 from typing import Any, Callable, Iterator
 import numpy as np
@@ -9,7 +9,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, truncate, AddrSpace
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters, VALIDATE_WITH_CPU
+from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters, VALIDATE_WITH_CPU, getenv
 from tinygrad.renderer import Renderer, TinyELF
 from tinygrad.codegen import full_rewrite_to_sink, linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
@@ -17,8 +17,8 @@ from tinygrad.engine.realize import link_linear, run_linear
 from tinygrad.codegen.compile import compile_linear
 from tinygrad.engine.jit import bind_export
 
-# decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
-slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
+# decorator to mark slow tests, run with RUN_SLOW=0 to skip them
+slow = unittest.skipUnless(getenv("RUN_SLOW", 1), "slow test, skipped by RUN_SLOW=0")
 from tinygrad.runtime.ops_python import PythonRenderer
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> UOp:
