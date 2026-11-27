@@ -1,9 +1,9 @@
 import numpy as np
 import torch
-import unittest
+import os, unittest, unittest.mock
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, getenv
 from test.helpers import needs_devices, slow
 
 np.random.seed(1337)
@@ -149,6 +149,19 @@ class TestOptim(unittest.TestCase):
     self._test_sgd(10, {'lr': 1e10}, 1e-6, 3e-4)
     self._test_adam(1, {'lr': 1e10}, 1e-4, 1e-4)
     self._test_adamw(1, {'lr': 1e10}, 1e-4, 1e-4)
+
+  def test_optim_dtype(self):
+    # optimizer state stored in a lower precision than the params (OPTIM_DTYPE)
+    self.addCleanup(getenv.cache_clear)
+    for optim_dtype in ["half", "bfloat16"]:
+      with self.subTest(optim_dtype=optim_dtype), unittest.mock.patch.dict(os.environ, {"OPTIM_DTYPE": optim_dtype}):
+        getenv.cache_clear()
+        for opt_fn in [lambda p: SGD(p, lr=0.1, momentum=0.9), lambda p: SGD(p, lr=0.1, momentum=0.9, nesterov=True), lambda p: AdamW(p)]:
+          w = Tensor([1.0, 2.0, 3.0, 4.0])
+          opt = opt_fn([w])
+          (w*w).sum().backward()
+          opt.step()
+          self.assertEqual(w.dtype, dtypes.float32)
 
   def test_assert_tensor_train(self):
     t = Tensor.ones((1,1))
