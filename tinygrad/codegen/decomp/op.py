@@ -59,7 +59,7 @@ def floormod_to_mod(a:UOp, b:UOp) -> UOp:
   if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.TRUNCMOD, b)
   r = a.alu(Ops.TRUNCMOD, b)
   # use where instead of mul to avoid being fused into MULACC (which int64 long-decomp doesn't handle)
-  return r + (r.ne(0) & (a<0).ne(b<0)).where(b, b.const_like(0))
+  return r + (r.ne(0) & (a<0).ne(b<0)).where(b, r.const_like(0))
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
@@ -92,7 +92,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       lambda x,c: x >> v if (v:=powers_of_two.get(c.val, 0)) else None)]
     # signed TRUNCDIV by 2**v -> (x + (x<0 ? c-1 : 0)) >> v
     pat += [(UPat(Ops.TRUNCDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("c"))),
-      lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
+      lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(x.const_like(c.val-1), 0)) >> v
         if (v:=powers_of_two.get(c.val, 0)) else None)]
     if not disable_fast_idiv:
       # fast_idiv handles non-pow2 divisors on non-negative inputs
@@ -102,7 +102,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       pat += [(UPat(Ops.TRUNCMOD, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
         lambda ctx, x, d: x - d * q if (q:=fast_idiv(ctx, x, d.val)) is not None else None)]
   if Ops.NEG in ops:
-    pat += [(UPat.var('x')*UPat.cvar('c'), lambda ctx,x,c: x.alu(Ops.NEG) if c.val == x.dtype.const(-1) else None)]
+    pat += [(UPat.var('x')*UPat.cvar('c'), lambda ctx,x,c: x.alu(Ops.NEG) if x.dtype.const(c.val) == x.dtype.const(-1) else None)]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]
   if Ops.CMPLT in ops:
     # These are late rewrites because simplex expects equalities to be a certain format
