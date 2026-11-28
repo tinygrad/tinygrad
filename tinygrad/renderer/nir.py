@@ -179,6 +179,7 @@ class NIRRenderer(Renderer):
   def param(self, b:mesa.nir_builder, x, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
   def prerender(self, uops:list[UOp]):
     self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, mesa.nir_shader_compiler_options.from_buffer_copy(self.nir_options), None)
+    self.b.exact = True # exact float math
   def postrender(self, uops:list[UOp]): pass
 
   def render(self, uops:list[UOp]):
