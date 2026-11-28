@@ -286,19 +286,20 @@ class AMDComputeQueue(HWQueue):
       mode=int(tracing), **trace_ctrl)
 
   def sqtt_setup_exec(self, info:ProgramInfo):
-    if SQTT_LIMIT_SE:
+    if SQTT_LIMIT_SE == 1:
       t = Device.target_for(self.devs[0])
       # Calculate number of CUs per SE to enable based on blocks count. 4 is maximum simd per CU, but on rdna we can trace only 1.
       cu_per_se = prod([x if isinstance(x, int) else 1 for x in info.global_size]) // ((t.get("cu", 0) // self.se_cnt) * 4)
-      for xcc in range(self.xccs):
-        with self.pred_exec(xcc_mask=1 << xcc):
-          for i in range(8 if self.gc.version[0] != 9 else 4):
-            if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
-            else:
-              sa_mask = (1 << (t.get("cu_per_sa", 0) // 2)) - 1
-              cu_mask = (1 << (cu_per_se + (1 if i == 0 else 0))) - 1
-              mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
-            self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
+    for xcc in range(self.xccs):
+      with self.pred_exec(xcc_mask=1 << xcc):
+        for i in range(8 if self.gc.version[0] != 9 else 4):
+          if not SQTT_LIMIT_SE: mask = 0xffffffff # the masks keep what was written last, so turn every CU back on
+          elif SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
+          else:
+            sa_mask = (1 << (t.get("cu_per_sa", 0) // 2)) - 1
+            cu_mask = (1 << (cu_per_se + (1 if i == 0 else 0))) - 1
+            mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
+          self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
 
   def sqtt_start(self, slot:UOp):
     self.memory_barrier()
