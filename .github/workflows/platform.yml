@@ -107,7 +107,7 @@ jobs:
         python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL'"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Run runtime tests
-      run: python -m pytest -n=auto test/runtime test/device/metal --durations=20 --splits 2 --group ${{ matrix.group }}
+      run: python -m pytest -n=auto test/runtime test/device/metal --durations=20 --splits 2 --group ${{ matrix.group }} --splitting-algorithm least_duration
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
