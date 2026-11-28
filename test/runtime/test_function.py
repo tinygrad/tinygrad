@@ -207,6 +207,13 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(f(a).numpy(), [2,3,4])
     np.testing.assert_equal(a.numpy(), [3,4,5])  # TODO: should be [1,2,3]
 
+  def test_iadd_0d_precompile(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor:
+      x += 1
+      return x
+    self.assertEqual(f(Tensor([1]).realize().reshape(())).item(), 2)
+
   def test_implicit_assign(self):
     a = Tensor([1,2,3])
     a += 1
