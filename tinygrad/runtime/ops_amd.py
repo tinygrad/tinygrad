@@ -115,11 +115,9 @@ class AMDComputeQueue(HWQueue):
     self.soc = import_soc(self.gc.version)
     self.profiled:list[UOp] = []
     self.pmc, self.sqtt, self.slots = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, getenv("PROF_SLOTS", 32)
+    if self.sqtt: self.se_cnt = se_for(self.devs[0])
     self.pmc_sched = self.pmc_schedule(self.devs[0]) if self.pmc else []
     if self.pmc: self.pmc_start()
-
-  @functools.cached_property
-  def se_cnt(self) -> int: return se_for(self.devs[0]) # only profiling reads it, so a target without se still compiles
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
 
