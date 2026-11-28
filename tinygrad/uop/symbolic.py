@@ -227,10 +227,16 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     ret.append(u)
   return UOp.usum(*ret) if changed else None
 
+def canonicalize_and(x:UOp) -> UOp|None:
+  if x.op_in_backward_slice_with_self(Ops.INDEX): return None
+  new = UOp.uand(*sorted(x.split_uop(Ops.AND), key=lambda u: (not u.ranges, tuple(sorted(r.arg for r in u.ranges)), u.tuplize)))
+  return new if new is not x else None
+
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
   (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(Ops.AND, dtype=dtypes.bool, name='x'), canonicalize_and),
 ])
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
@@ -362,12 +368,13 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   for stmt in valid.split_uop(Ops.AND):
     if (res:=parse_valid(stmt)) is None: continue
     expr, is_upper, c = res
-    bounds[expr][int(is_upper)] = c
+    cur = bounds[expr][int(is_upper)]
+    bounds[expr][int(is_upper)] = c if cur is None else min(cur, c) if is_upper else max(cur, c)
 
   # simplify uop given that valid is True
   all_candidates = []
   for i,(expr,v) in enumerate(bounds.items()):
-    v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
+    v0, v1 = (expr.vmin if v[0] is None else max(expr.vmin, v[0]), expr.vmax if v[1] is None else min(expr.vmax, v[1]))
     all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
 
     if try_simplex and expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible and u.op is not Ops.CONST for u in expr.split_uop(Ops.ADD)):

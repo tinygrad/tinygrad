@@ -1538,7 +1538,7 @@ class TestInvalidIndex(unittest.TestCase):
     ridx1 = Variable("ridx1", 0, 10)
     idx0 = (ridx0<5).where(ridx0, UOp.invalid())
     idx1 = (ridx1<5).where(idx0//2, UOp.invalid())
-    self.assertIs(idx1.simplify(), ((ridx1<5)&(ridx0<5)).where(ridx0//2, UOp.invalid()),
+    self.assertIs(idx1.simplify(), ((ridx0<5)&(ridx1<5)).where(ridx0//2, UOp.invalid()),
       "valid inside a valid should make a single valid and & the conditions")
 
   def test_alu_invalid(self):

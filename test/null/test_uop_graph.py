@@ -160,6 +160,35 @@ class TestGraphRewrite(unittest.TestCase):
     b = UOp.variable('b', 0, 1)
     self.assertIs((a+b).simplify(), (b+a).simplify())
 
+  def test_commutative_bool_and(self):
+    r0, r1, r2 = UOp.range(8, 0), UOp.range(8, 1), UOp.range(8, 2)
+    c0, c1, c2 = r0 < 4, r1 < 4, r2 < 4
+    self.assertIs((c0 & c1).simplify(), (c1 & c0).simplify())
+    self.assertIs(((c0 & c1) & c2).simplify(), ((c2 & c1) & c0).simplify())
+    self.assertIs((c0 & (c1 & c2)).simplify(), ((c2 & c0) & c1).simplify())
+    # data-dependent bool AND (contains INDEX) must not be reordered
+    p0, p1 = UOp.param(0, dtypes.bool, 8).index(r0), UOp.param(1, dtypes.bool, 8).index(r0)
+    self.assertIs((p1 & p0).simplify(), p1 & p0)
+
+  def test_padded_guards_deduped(self):
+    from tinygrad import Context, Tensor
+    # conv2d padding guard should not emit both (a & b) and (b & a)
+    conv_ast = [u.src[0] for u in Tensor.empty(1, 4, 16, 16).conv2d(Tensor.empty(8, 4, 3, 3), padding=1, stride=2).schedule_linear().toposort()
+                if u.op is Ops.CALL][-1]
+    self.assertEqual(len([u for u in conv_ast.toposort() if u.op is Ops.AND]), 1)
+    # max_pool2d and non-zero 2D/3D pad should fold the outer WHERE into the gated LOAD alt value
+    with Context(NOOPT=1):
+      for t, expected_alt in [
+        (Tensor.empty(1, 4, 16, 16).max_pool2d(kernel_size=3, stride=2, padding=1), float("-inf")),
+        (Tensor.empty(1, 4, 16, 16).pad(((0, 0), (0, 0), (1, 1), (1, 1)), value=1.0) + 1.0, 1.0),
+        (Tensor.empty(1, 8, 8, 8).pad(((0, 0), (1, 1), (1, 1), (1, 1)), value=1.0) + 1.0, 1.0),
+      ]:
+        ast = [u.src[0] for u in t.schedule_linear().toposort() if u.op is Ops.CALL][-1]
+        lowered = full_rewrite(ast)
+        gated_loads = [u for u in lowered.toposort() if u.op is Ops.LOAD and len(u.src) == 3]
+        self.assertEqual(len(gated_loads), 1)
+        self.assertEqual(gated_loads[0].src[1].val, expected_alt)
+
   def test_consts_go_last_right_away(self):
     a = UOp.variable('a', 0, 1)
     tst = (2+a).simplify()
