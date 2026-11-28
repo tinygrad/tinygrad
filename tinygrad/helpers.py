@@ -227,7 +227,9 @@ class Target:
     return (fst + "+" if fst else "") + snd
   @property
   def opts(self) -> dict[str, str]: return dict(x.split("=", 1) for x in self.props.split(",") if x)
-  def get(self, key:str, default:Any="") -> Any: return type(default)(self.opts.get(key, default))
+  def get(self, key:str, default:Any=None) -> Any:
+    if default is None and key not in self.opts: raise RuntimeError(f"no {key} for {self.device}: set it in DEV")
+    return self.opts[key] if default is None else type(default)(self.opts.get(key, default))
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
