@@ -95,7 +95,7 @@ def lds_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("lds", dict(
 def waves_for(dev:str) -> UOp: return UOp.extern((), dtypes.u32, None, to_name(dev, "waves"))
 def scratch_wavesize(dev:str, psize:int) -> int: # the scratch of a wave (64 lanes), in units of 256 bytes (1024 on gfx9)
   return ceildiv(max(psize, 128) * 64, 256 if gc_for(dev).version[0] != 9 else 1024)
-def se_for(dev:str) -> int: return Device.target_for(dev).get("se", 0)
+def se_for(dev:str) -> int: return int(Device.target_for(dev).opts["se"])
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
@@ -111,12 +111,15 @@ def dispatch_packet(data:AMDProgramData, dims:tuple, kernel_object:UOp=UOp.const
 class AMDComputeQueue(HWQueue):
   def __init__(self, submit):
     super().__init__(submit)
-    self.pm4, self.gc, self.xccs, self.se_cnt = pm4_for(self.devs[0]), gc_for(self.devs[0]), xccs_for(self.devs[0]), se_for(self.devs[0])
+    self.pm4, self.gc, self.xccs = pm4_for(self.devs[0]), gc_for(self.devs[0]), xccs_for(self.devs[0])
     self.soc = import_soc(self.gc.version)
     self.profiled:list[UOp] = []
     self.pmc, self.sqtt, self.slots = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, getenv("PROF_SLOTS", 32)
     self.pmc_sched = self.pmc_schedule(self.devs[0]) if self.pmc else []
     if self.pmc: self.pmc_start()
+
+  @functools.cached_property
+  def se_cnt(self) -> int: return se_for(self.devs[0]) # only profiling reads it, so a target without se still compiles
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
 
@@ -228,7 +231,7 @@ class AMDComputeQueue(HWQueue):
       block, idx = counters[name]
       # sq block on gfx11+ goes down to wgps
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
-        "SQ": (1, se_for(dev)) + ((1, 1) if gfx9 else (2, t.get("cu_per_sa", 0) // 2))}[block]
+        "SQ": (1, se_for(dev)) + ((1, 1) if gfx9 else (2, int(t.opts["cu_per_sa"]) // 2))}[block]
       end_off += (rec_size:=prod((xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
       # gfx11+ and later require even-numbered SQ *_SELECT registers
       regsample = f'reg{block}_PERFCOUNTER{(pcid:=next(block2pid[block]))}'
@@ -255,7 +258,7 @@ class AMDComputeQueue(HWQueue):
     self.pmc_reset_counters(en=True)
 
   def pmc_read(self, slot:UOp):
-    pmc_size, wgp_mask = sum(smp.size for smp, _, _ in self.pmc_sched), Device.target_for(self.devs[0]).get("wgp_mask", -1)
+    pmc_size, wgp_mask = sum(smp.size for smp, _, _ in self.pmc_sched), int(Device.target_for(self.devs[0]).opts["wgp_mask"])
     buf = self.prof_buf("pmc_buf", dtypes.uint8, pmc_size * self.slots).getaddr(self.devs) + slot * pmc_size
     self.set_grbm()
     self.wreg(self.gc.regCP_PERFMON_CNTL if self.gc.version[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1, perfmon_sample_enable=1)
@@ -289,13 +292,13 @@ class AMDComputeQueue(HWQueue):
     if SQTT_LIMIT_SE:
       t = Device.target_for(self.devs[0])
       # Calculate number of CUs per SE to enable based on blocks count. 4 is maximum simd per CU, but on rdna we can trace only 1.
-      cu_per_se = prod([x if isinstance(x, int) else 1 for x in info.global_size]) // ((t.get("cu", 0) // self.se_cnt) * 4)
+      cu_per_se = prod([x if isinstance(x, int) else 1 for x in info.global_size]) // ((int(t.opts["cu"]) // self.se_cnt) * 4)
       for xcc in range(self.xccs):
         with self.pred_exec(xcc_mask=1 << xcc):
           for i in range(8 if self.gc.version[0] != 9 else 4):
             if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
             else:
-              sa_mask = (1 << (t.get("cu_per_sa", 0) // 2)) - 1
+              sa_mask = (1 << (int(t.opts["cu_per_sa"]) // 2)) - 1
               cu_mask = (1 << (cu_per_se + (1 if i == 0 else 0))) - 1
               mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
             self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
