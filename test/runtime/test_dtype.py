@@ -98,6 +98,8 @@ class _DTypePairs:
 
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
+    if Device.DEFAULT == "QCOM" and DEV.renderer != "IR3" and self.DTYPE == dtypes.fp8e4m3:
+      raise unittest.SkipTest("QCOMCL miscompiles int min ~max(~a,~b)")
     for dtype in get_available_cast_dtypes(self.DTYPE):
       if dtype != dtypes.bool:
         _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype)
@@ -397,6 +399,7 @@ class TestUint64DType(TestDType):
   @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
   def test_uint64_cast_double(self):
     assert Tensor([2**32 + 1], dtype=dtypes.uint64).cast(dtypes.double).numpy() == 2**32 + 1
+  @unittest.skipIf(Device.DEFAULT == "QCOM" and DEV.renderer == "IR3", "IR3 rounds int to float toward zero")
   def test_uint64_cast_float_rounds_once(self):
     self.assertEqual(Tensor([2**25+3], dtype=dtypes.uint64).cast(dtypes.float32).tolist(), [2**25+4])
   @unittest.skipIf(dtypes.double not in supported_dtypes, "needs float64")
