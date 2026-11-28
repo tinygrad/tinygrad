@@ -238,6 +238,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         if req.max_tokens is not None and n >= req.max_tokens:
           req.finish_reason = "length"
           break
+      else: req.finish_reason = "length"
       finished = True
     finally:
       et = time.perf_counter()
