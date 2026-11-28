@@ -130,6 +130,11 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
   dts = [x.dtype for x in src]
   return dts[0] if all_same(dts) else least_upper_dtype(*dts)
 
+def call_return_value(body:UOp) -> UOp:
+  if body.op is Ops.PROGRAM: body = body.src[0]
+  if body.op is Ops.LINEAR: body = body.src[-1]
+  return body.src[-1] if body.op is Ops.SINK else body
+
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   # here are the dtype production rules, total over all Ops
   if op in GroupOp.PassthroughDType: return src[0].dtype
@@ -142,7 +147,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       return dtypes.void
     case Ops.CALL:
       # a call has the dtype of its body, void for opaque bodies
-      return src[0].dtype
+      return call_return_value(src[0]).dtype
     case Ops.NATIVE:
       return src[0].dtype if src else dtypes.void
     case Ops.INDEX:
@@ -376,8 +381,11 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         return wmma_b + (self.src[2].shape[-1],)
 
       # passthrough ops
+      case Ops.CALL:
+        return call_return_value(self.body)._shape
+
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
-           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL:
+          Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END:
         return self.src[0]._shape
 
       case Ops.NATIVE:
@@ -1330,8 +1338,10 @@ def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
     f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots, init_ctx=CountCtx, walk=True)
-    assert f.op is Ops.SINK, f"expected a sink, got {f.op}"
-    if f.arg is None: f = f.replace(arg=KernelInfo(name or fn.__name__))
+    # TODO: the right api for this
+    #assert f.op is Ops.SINK, f"expected a sink, got {f.op}"
+    assert f.op in {Ops.SINK, Ops.NATIVE}
+    if f.op is Ops.SINK and f.arg is None: f = f.replace(arg=KernelInfo(name or fn.__name__))
     with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values())
   return functools.wraps(fn)(outlined)
 

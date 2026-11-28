@@ -448,4 +448,4 @@ def setup_usb_rules(dev): # placeholders the gpu owns
   Compiled.link_bufs |= {to_name(dev.device, n): b for n, b in (("usb_host", host), ("usb_go", go), ("usb_asm24", dev.iface.ctrl))}
   dev.error_state = host.view(8, 40) # the link's error word
 
-if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
+if DEV.interface.startswith("MOCK") and DEV.device != "CPU": from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
