@@ -53,7 +53,7 @@ class ParamArg:
 class StageOpts:
   device: str|tuple[str, ...]|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
-  removable: bool = True
+  removable: bool = False
 
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u"}

@@ -1,7 +1,7 @@
 import unittest, pytest, weakref
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, AxisType, broadcast_axes, KernelInfo, StageOpts
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
 from tinygrad.codegen.simplify import pm_reduce_collapse
 from test.helpers import full_rewrite, to_uops_list

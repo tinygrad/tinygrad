@@ -147,7 +147,7 @@ pm_stage_to_store = PatternMatcher([
   (UPat(Ops.STAGE, name="st"), stage_to_store),
   (UPat.var("dst").index(name="ind", allow_any_len=True).store(UPat.var("src")), fix_store_hazard),
   (UPat.var("x").stage(name="st", allow_any_len=True).index(name="ind", allow_any_len=True),
-  lambda ind, st, x: x.substitute(dict(zip(st.src[1:], ind.src[1:])), extra_pm=pm_gate_ranges) if st.arg.removable else ind),
+  lambda ind, st, x: x.substitute(dict(zip(st.src[1:], ind.src[1:])), extra_pm=pm_gate_ranges) if st.arg is None or st.arg.removable else ind),
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstk"),), name="msel"), lambda msel, mstk: mstk.src[msel.arg]),
   (UPat((Ops.MSELECT,Ops.MSTACK), name="m"), lambda m: m.replace(src=tuple(s.base for s in m.src)).view_as(m.shape))
 ])
