@@ -915,10 +915,10 @@ class UOp(Mixin, metaclass=UOpMetaClass):
 
   def has_buffer_identity(self, after_ok=False):
     """Check if this UOp has a storage identity in the graph, whether or not its buffer is bound."""
-    # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
+    if self.op is Ops.MSTACK: return all(s.has_buffer_identity(after_ok) for s in self.src)
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in GroupOp.Defines
+    return self.op in GroupOp.Defines and self.addrspace is not AddrSpace.ALU
 
   @functools.cached_property
   def _buffer_view(self) -> tuple[UOp, int]:
