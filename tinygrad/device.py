@@ -40,7 +40,11 @@ class _Device:
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()} as DEV={self.target_for(ix)}")
     return ret
   def target_for(self, device:str, cv=DEV) -> Target:
-    if (t:=cv.target(device.split(':')[0])).arch: return t
+    if (t:=cv.target(device.split(':')[0])).arch:
+      # an arch in DEV is not a reason to drop the opened device's props (se/cu/lds/...), only to not open it
+      if (d:=self._opened_devices.get(self.canonicalize(device))) is None: return t
+        iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
+      return replace(t, interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
     try: d = self._opened_devices.get(device:=self.canonicalize(device)) or self[device]
     except Exception as e: raise RuntimeError(f"no target for {device}: set its arch in DEV, or open it") from e
     iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
