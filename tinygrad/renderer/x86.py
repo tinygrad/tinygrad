@@ -142,9 +142,12 @@ extra_matcher = PatternMatcher([
   (UPat.var("y", (dtypes.bool,)+dtypes.int8s+dtypes.int16s).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
   # int/float casts only for signed int
   (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
-  # casting uint64 to float requires special handling
+  (UPat.var("y", dtypes.floats).cast(dtypes.uint32, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
+  # casting uint64 to float and back requires special handling
   (UPat.var("y", dtypes.uint64).cast(dtypes.floats, name="x"), lambda y,x:
    (y < 2**63).where(y.cast(dtypes.int64).cast(x.dtype), ((y >> 1) | (y & 1)).cast(dtypes.int64).cast(x.dtype) * 2)),
+  (UPat.var("y", dtypes.floats).cast(dtypes.uint64, name="x"), lambda y,x:
+   (y < 2**63).where(y.cast(dtypes.int64).cast(x.dtype), (y - 2**63).cast(dtypes.int64).cast(x.dtype) + 2**63)),
   # no int8 mul or cmove, cast to int16
   (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),

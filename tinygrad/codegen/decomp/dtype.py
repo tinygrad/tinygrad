@@ -30,7 +30,11 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       if x.dtype is dtypes.bool or x.dtype in dtypes.uints: return lo, lo.const_like(0)
       return lo, (x < x.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong):
-      return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0))
+      # the words of |trunc(x)| are exact in float, a negative x negates the pair
+      x = uops[0] if uops[0].dtype == dtypes.float64 else uops[0].cast(dtypes.float32)
+      hi = ((a:=x.trunc().abs()) / 2**32).trunc()
+      w = tuple(v.cast(dtypes.uint).bitcast(l2i_dt[dt]) for v in (a - hi * 2**32, hi))
+      return tuple((x < 0).where(n, p) for n,p in zip(l2i(Ops.NEG, l2i_dt[dt], *w), w))
     case Ops.CAST if dt in dtypes.floats:
       small = (a1.eq(0) & (a0 >= 0)) | (a1.eq(-1) & (a0 < 0))
       cdt = dt if dt == dtypes.float64 else dtypes.float32
