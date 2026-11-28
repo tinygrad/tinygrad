@@ -56,7 +56,7 @@ from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import link_linear, run_linear
 from tinygrad.codegen.compile import compile_linear
 from tinygrad.codegen import to_program, to_program_config
-from tinygrad.helpers import Context, DEV, to_mv, ContextVar
+from tinygrad.helpers import Context, DEV, to_mv, mv_address, ContextVar
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, get_elf_section
 
@@ -295,6 +295,8 @@ class _Ctx:
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds", addrspace=AddrSpace.REG)
   scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch", addrspace=AddrSpace.REG)
   scratch_stride = UOp.param(9, dtypes.uint32, name="scratch_stride", addrspace=AddrSpace.ALU)
+  trace = UOp.param(10, dtypes.uint32, 1 << 30, name="trace", addrspace=AddrSpace.GLOBAL)
+  trace_en = UOp.param(11, dtypes.bool, name="trace_en", addrspace=AddrSpace.ALU)
 
   def __init__(self, wave_size: int = 32):
     self._axis_id, self.wave_size = 0, wave_size
@@ -1763,6 +1765,19 @@ def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
   w = UOp.range(waves, 0, dtype=dtypes.int)
   return active[0].store(routes[w].load().eq(header).cast(dtypes.u32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
+def _trace_inst(ctx:_Ctx, trace_words:int, pc:int, inst:Inst) -> UOp:
+  ds_addr = getattr(inst, "addr", None) if isinstance(inst, ir3.DS) else None
+  has_ds_addr = ds_addr is not None and getattr(ds_addr, "offset", 0) >= 256
+  n, words = ctx.trace.index(_c(0, dtypes.int).valid(ctx.trace_en)).load().cast(dtypes.int), 2 + (ctx.wave_size if has_ds_addr else 0)
+  ok = ctx.trace_en & (n + words < _c(trace_words, dtypes.int))
+  stores = [ctx.trace.index((n + i + 1).valid(ok)).store(v) for i, v in enumerate([_c(pc), ctx.sgpr.index(_c(EXEC_LO.offset, dtypes.int)).load()])]
+  if has_ds_addr and ds_addr is not None:
+    lane = UOp.range(ctx.wave_size, 1, dtype=dtypes.int)
+    addr = ctx.vgpr.index(_c((ds_addr.offset - 256) * ctx.wave_size, dtypes.int) + lane).load()
+    stores.append(ctx.trace.index((n + 3 + lane).valid(ok)).store(addr).end(lane))
+  return lower_body(UOp.sink(*stores, ctx.trace.index(_c(0, dtypes.int).valid(ctx.trace_en)).store((n + words).cast(dtypes.u32)))
+                       .replace(arg=KernelInfo("emu_trace")))
+
 def lower_body(sink:UOp) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:UOp.param(i, b.dtype, b.shape, name=b.arg.name, addrspace=b.addrspace) for i,b in enumerate(bufs)}, walk=True)
@@ -1849,7 +1864,7 @@ pm_remove_native = PatternMatcher([
 PC_INSTS = ("S_GETPC", "S_SETPC")
 
 @rewrite_group(replay="emu_process_replay")
-def lift(code:bytes, arch:str, dispatch:tuple, name:str="") -> UOp:
+def lift(code:bytes, arch:str, dispatch:tuple, name:str="", trace_words:int=0, trace_wgs:int=0) -> UOp:
   insts = amd_decode(code, arch)
   assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
@@ -1874,6 +1889,9 @@ def lift(code:bytes, arch:str, dispatch:tuple, name:str="") -> UOp:
   buffers = {ctx.sgpr:(sgpr, SGPR_COUNT), ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
+  if trace_words:
+    wg_off = wg.minimum(trace_wgs).cast(dtypes.int) * (n_waves * trace_words)
+    buffers[ctx.trace] = (ctx.trace.shrink(((wg_off, wg_off + n_waves * trace_words),)), trace_words)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
   route = UOp.param(6, dtypes.int, (1,), name="route", addrspace=AddrSpace.REG)
@@ -1907,10 +1925,13 @@ def lift(code:bytes, arch:str, dispatch:tuple, name:str="") -> UOp:
     cond = UOp.const(True)
     instructions = []
     for off in cfg["blocks"][block_pc]:
+      if trace_words and not getattr(insts[off], "op_name", "").startswith("S_CODE_END"):
+        instructions.append(_trace_inst(ctx, trace_words, off, insts[off]))
       call, branch_cond = instruction_call(insts[off], arch)
       if branch_cond is not None: cond = branch_cond
       instructions.append(call)
-    values = {ctx.scratch_stride:_c(scratch_size)}
+    values:dict[UOp, UOp] = {ctx.scratch_stride:_c(scratch_size)}
+    if trace_words: values[ctx.trace_en] = wg < _c(trace_wgs, dtypes.u64)
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
@@ -1952,15 +1973,17 @@ RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 REPLAY_EMU = ContextVar("REPLAY_EMU", 0)
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
-            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm") -> int:
+            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm",
+            trace: memoryview | None = None, trace_words: int = 0, trace_wgs: int = 0) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="",
                CAPTURE_PROCESS_REPLAY=REPLAY_EMU.value, DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1):
     code = bytes(to_mv(lib, lib_sz))
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size)
     renderer = Device['CPU'].renderer
-    if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = to_program(lift(code, arch, dispatch, f"emu {name}"), renderer)
+    tkey = (trace_words, trace_wgs) if trace_words else ()
+    if (key:=(code, arch, dispatch, name, *tkey, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
+      dispatch_cache[key] = to_program(lift(code, arch, dispatch, f"emu {name}", trace_words, trace_wgs), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
@@ -1971,10 +1994,17 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         relift_lib = get_elf_section(ret.src[3].arg, ".text").content
     prg = dispatch_cache[key]
   vmem_buf = UOp.from_buffer(Buffer('CPU', 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.u32)
+  inputs = [vmem_buf]
   args = [vmem_buf.as_extern(0)] * (max(p.arg.slot for p in prg.kernel_params) + 1)
+  if trace is not None:
+    ptr = mv_address(trace)
+    trace_buf = UOp.from_buffer(Buffer('CPU', trace.nbytes, options=BufferSpec(external_ptr=ptr), opaque=ptr), dtypes.u32)
+    inputs.append(trace_buf)
+    for p in prg.kernel_params:
+      if p.arg.name == "trace": args[p.arg.slot] = trace_buf.as_extern(1)
   for p in prg.kernel_params:
     if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
   with _MXCSRContext():
     linear = compile_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), cache=True)
-    run_linear(link_linear(linear, inputs:=[vmem_buf]), input_uops=inputs, update_stats=False)
+    run_linear(link_linear(linear, inputs), input_uops=inputs, update_stats=False)
   return 0
